@@ -12,7 +12,7 @@ def employee_to_model(employee: domain.Employee) -> domain.EmployeeModel:
         skills=list(employee.skills),
         unavailable_dates=[d.isoformat() for d in employee.unavailable_dates],
         undesired_dates=[d.isoformat() for d in employee.undesired_dates],
-        desired_dates=[d.isoformat() for d in employee.desired_dates]
+        desired_dates=[d.isoformat() for d in employee.desired_dates],
     )
 
 
@@ -23,16 +23,18 @@ def shift_to_model(shift: domain.Shift) -> domain.ShiftModel:
         end=shift.end.isoformat(),
         location=shift.location,
         required_skill=shift.required_skill,
-        employee=employee_to_model(shift.employee) if shift.employee else None
+        employee=employee_to_model(shift.employee) if shift.employee else None,
     )
 
 
-def schedule_to_model(schedule: domain.EmployeeSchedule) -> domain.EmployeeScheduleModel:
+def schedule_to_model(
+    schedule: domain.EmployeeSchedule,
+) -> domain.EmployeeScheduleModel:
     return domain.EmployeeScheduleModel(
         employees=[employee_to_model(e) for e in schedule.employees],
         shifts=[shift_to_model(s) for s in schedule.shifts],
         score=str(schedule.score) if schedule.score else None,
-        solver_status=schedule.solver_status.name if schedule.solver_status else None
+        solver_status=schedule.solver_status.name if schedule.solver_status else None,
     )
 
 
@@ -43,7 +45,7 @@ def model_to_employee(model: domain.EmployeeModel) -> domain.Employee:
         skills=set(model.skills),
         unavailable_dates={date.fromisoformat(d) for d in model.unavailable_dates},
         undesired_dates={date.fromisoformat(d) for d in model.undesired_dates},
-        desired_dates={date.fromisoformat(d) for d in model.desired_dates}
+        desired_dates={date.fromisoformat(d) for d in model.desired_dates},
     )
 
 
@@ -62,7 +64,7 @@ def model_to_shift(model: domain.ShiftModel, employee_lookup: dict) -> domain.Sh
         end=datetime.fromisoformat(model.end),
         location=model.location,
         required_skill=model.required_skill,
-        employee=employee
+        employee=employee,
     )
 
 
@@ -74,15 +76,13 @@ def model_to_schedule(model: domain.EmployeeScheduleModel) -> domain.EmployeeSch
     employee_lookup = {e.name: e for e in employees}
 
     # Convert shifts with employee lookups
-    shifts = [
-        model_to_shift(s, employee_lookup)
-        for s in model.shifts
-    ]
+    shifts = [model_to_shift(s, employee_lookup) for s in model.shifts]
 
     # Handle score
     score = None
     if model.score:
-        from blackops_legacy.solver.score import HardSoftDecimalScore
+        from solverforge_legacy.solver.score import HardSoftDecimalScore
+
         score = HardSoftDecimalScore.parse(model.score)
 
     # Handle solver status
@@ -91,8 +91,5 @@ def model_to_schedule(model: domain.EmployeeScheduleModel) -> domain.EmployeeSch
         solver_status = domain.SolverStatus[model.solver_status]
 
     return domain.EmployeeSchedule(
-        employees=employees,
-        shifts=shifts,
-        score=score,
-        solver_status=solver_status
+        employees=employees, shifts=shifts, score=score, solver_status=solver_status
     )

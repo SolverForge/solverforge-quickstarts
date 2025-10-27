@@ -1,9 +1,11 @@
-from blackops_legacy.solver.score import HardSoftDecimalScore
+from solverforge_legacy.solver.score import HardSoftDecimalScore
 from typing import Any
 from pydantic import BaseModel, ConfigDict, PlainSerializer, BeforeValidator
 from pydantic.alias_generators import to_camel
 
-ScoreSerializer = PlainSerializer(lambda score: str(score) if score is not None else None, return_type=str | None)
+ScoreSerializer = PlainSerializer(
+    lambda score: str(score) if score is not None else None, return_type=str | None
+)
 
 
 def validate_score(v: Any) -> Any:

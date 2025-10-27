@@ -1,6 +1,11 @@
-from blackops_legacy.solver import SolverFactory
-from blackops_legacy.solver.config import (SolverConfig, ScoreDirectorFactoryConfig,
-                                    TerminationConfig, Duration, TerminationCompositionStyle)
+from solverforge_legacy.solver import SolverFactory
+from solverforge_legacy.solver.config import (
+    SolverConfig,
+    ScoreDirectorFactoryConfig,
+    TerminationConfig,
+    Duration,
+    TerminationCompositionStyle,
+)
 
 from hello_world.domain import *
 from hello_world.constraints import define_constraints
@@ -20,9 +25,10 @@ def test_feasible():
                     TerminationConfig(best_score_feasible=True),
                     TerminationConfig(spent_limit=Duration(seconds=30)),
                 ],
-                termination_composition_style=TerminationCompositionStyle.OR
-            )
-        ))
+                termination_composition_style=TerminationCompositionStyle.OR,
+            ),
+        )
+    )
     solver = solver_factory.build_solver()
     solution = solver.solve(generate_demo_data(DemoData.SMALL))
     assert solution.score.is_feasible

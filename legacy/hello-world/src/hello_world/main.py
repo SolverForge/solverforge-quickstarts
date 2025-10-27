@@ -1,6 +1,10 @@
-from blackops_legacy.solver.config import (SolverConfig, ScoreDirectorFactoryConfig,
-                                    TerminationConfig, Duration)
-from blackops_legacy.solver import SolverFactory
+from solverforge_legacy.solver.config import (
+    SolverConfig,
+    ScoreDirectorFactoryConfig,
+    TerminationConfig,
+    Duration,
+)
+from solverforge_legacy.solver import SolverFactory
 from enum import Enum
 from datetime import time
 import logging
@@ -11,15 +15,19 @@ from .constraints import define_constraints
 
 
 logging.basicConfig(level=logging.INFO)
-LOGGER = logging.getLogger('app')
+LOGGER = logging.getLogger("app")
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Solve a school timetable.')
-    parser.add_argument('--demo_data', dest='demo_data', action='store',
-                        choices=['SMALL', 'LARGE'],
-                        default='SMALL',
-                        help='Demo dataset to use')
+    parser = argparse.ArgumentParser(description="Solve a school timetable.")
+    parser.add_argument(
+        "--demo_data",
+        dest="demo_data",
+        action="store",
+        choices=["SMALL", "LARGE"],
+        default="SMALL",
+        help="Demo dataset to use",
+    )
     args = parser.parse_args()
 
     solver_factory = SolverFactory.create(
@@ -33,8 +41,9 @@ def main():
                 # The solver runs only for 5 seconds on this small dataset.
                 # It's recommended to run for at least 5 minutes ("5m") otherwise.
                 spent_limit=Duration(seconds=5)
-            )
-        ))
+            ),
+        )
+    )
 
     # Load the problem
     demo_data = getattr(DemoData, args.demo_data)
@@ -48,18 +57,30 @@ def main():
     print_timetable(solution)
 
 
-def generate_demo_data(demo_data: 'DemoData') -> Timetable:
-    days = (('MONDAY', 'TUESDAY') if demo_data == DemoData.SMALL
-            else ('MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'))
+def generate_demo_data(demo_data: "DemoData") -> Timetable:
+    days = (
+        ("MONDAY", "TUESDAY")
+        if demo_data == DemoData.SMALL
+        else ("MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY")
+    )
     timeslots = [
         Timeslot(day, start, start.replace(hour=start.hour + 1))
         for day in days
-        for start in (time(8, 30), time(9, 30), time(10, 30), time(13, 30), time(14, 30))
+        for start in (
+            time(8, 30),
+            time(9, 30),
+            time(10, 30),
+            time(13, 30),
+            time(14, 30),
+        )
     ]
 
-    room_ids = (('A', 'B', 'C') if demo_data == DemoData.SMALL
-                else ('A', 'B', 'C', 'D', 'E', 'F'))
-    rooms = [Room(f'Room {name}') for name in room_ids]
+    room_ids = (
+        ("A", "B", "C")
+        if demo_data == DemoData.SMALL
+        else ("A", "B", "C", "D", "E", "F")
+    )
+    rooms = [Room(f"Room {name}") for name in room_ids]
 
     lessons = []
 
@@ -120,9 +141,15 @@ def generate_demo_data(demo_data: 'DemoData') -> Timetable:
         lessons.append(Lesson(next(ids), "Drama", "I. Jones", "10th grade"))
         lessons.append(Lesson(next(ids), "Art", "S. Dali", "10th grade"))
         lessons.append(Lesson(next(ids), "Art", "S. Dali", "10th grade"))
-        lessons.append(Lesson(next(ids), "Physical education", "C. Lewis", "10th grade"))
-        lessons.append(Lesson(next(ids), "Physical education", "C. Lewis", "10th grade"))
-        lessons.append(Lesson(next(ids), "Physical education", "C. Lewis", "10th grade"))
+        lessons.append(
+            Lesson(next(ids), "Physical education", "C. Lewis", "10th grade")
+        )
+        lessons.append(
+            Lesson(next(ids), "Physical education", "C. Lewis", "10th grade")
+        )
+        lessons.append(
+            Lesson(next(ids), "Physical education", "C. Lewis", "10th grade")
+        )
 
         lessons.append(Lesson(next(ids), "Math", "A. Turing", "11th grade"))
         lessons.append(Lesson(next(ids), "Math", "A. Turing", "11th grade"))
@@ -146,9 +173,15 @@ def generate_demo_data(demo_data: 'DemoData') -> Timetable:
         lessons.append(Lesson(next(ids), "Drama", "P. Cruz", "11th grade"))
         lessons.append(Lesson(next(ids), "Art", "S. Dali", "11th grade"))
         lessons.append(Lesson(next(ids), "Art", "S. Dali", "11th grade"))
-        lessons.append(Lesson(next(ids), "Physical education", "C. Lewis", "11th grade"))
-        lessons.append(Lesson(next(ids), "Physical education", "C. Lewis", "11th grade"))
-        lessons.append(Lesson(next(ids), "Physical education", "C. Lewis", "11th grade"))
+        lessons.append(
+            Lesson(next(ids), "Physical education", "C. Lewis", "11th grade")
+        )
+        lessons.append(
+            Lesson(next(ids), "Physical education", "C. Lewis", "11th grade")
+        )
+        lessons.append(
+            Lesson(next(ids), "Physical education", "C. Lewis", "11th grade")
+        )
 
         lessons.append(Lesson(next(ids), "Math", "A. Turing", "12th grade"))
         lessons.append(Lesson(next(ids), "Math", "A. Turing", "12th grade"))
@@ -172,9 +205,15 @@ def generate_demo_data(demo_data: 'DemoData') -> Timetable:
         lessons.append(Lesson(next(ids), "Drama", "P. Cruz", "12th grade"))
         lessons.append(Lesson(next(ids), "Art", "S. Dali", "12th grade"))
         lessons.append(Lesson(next(ids), "Art", "S. Dali", "12th grade"))
-        lessons.append(Lesson(next(ids), "Physical education", "C. Lewis", "12th grade"))
-        lessons.append(Lesson(next(ids), "Physical education", "C. Lewis", "12th grade"))
-        lessons.append(Lesson(next(ids), "Physical education", "C. Lewis", "12th grade"))
+        lessons.append(
+            Lesson(next(ids), "Physical education", "C. Lewis", "12th grade")
+        )
+        lessons.append(
+            Lesson(next(ids), "Physical education", "C. Lewis", "12th grade")
+        )
+        lessons.append(
+            Lesson(next(ids), "Physical education", "C. Lewis", "12th grade")
+        )
 
     return Timetable(demo_data.name, timeslots, rooms, lessons)
 
@@ -187,7 +226,11 @@ def print_timetable(time_table: Timetable) -> None:
     timeslots = time_table.timeslots
     lessons = time_table.lessons
     lesson_map = {
-        (lesson.room.name, lesson.timeslot.day_of_week, lesson.timeslot.start_time): lesson
+        (
+            lesson.room.name,
+            lesson.timeslot.day_of_week,
+            lesson.timeslot.start_time,
+        ): lesson
         for lesson in lessons
         if lesson.room is not None and lesson.timeslot is not None
     }
@@ -195,33 +238,46 @@ def print_timetable(time_table: Timetable) -> None:
     sep_format = "+" + ((("-" * column_width) + "+") * (len(rooms) + 1))
 
     LOGGER.info(sep_format)
-    LOGGER.info(row_format.format('', *[room.name for room in rooms]))
+    LOGGER.info(row_format.format("", *[room.name for room in rooms]))
     LOGGER.info(sep_format)
 
     for timeslot in timeslots:
+
         def get_row_lessons():
             for room in rooms:
-                yield lesson_map.get((room.name, timeslot.day_of_week, timeslot.start_time),
-                                     Lesson('', '', '', ''))
+                yield lesson_map.get(
+                    (room.name, timeslot.day_of_week, timeslot.start_time),
+                    Lesson("", "", "", ""),
+                )
 
         row_lessons = [*get_row_lessons()]
-        LOGGER.info(row_format.format(str(timeslot), *[lesson.subject for lesson in row_lessons]))
-        LOGGER.info(row_format.format('', *[lesson.teacher for lesson in row_lessons]))
-        LOGGER.info(row_format.format('', *[lesson.student_group for lesson in row_lessons]))
+        LOGGER.info(
+            row_format.format(
+                str(timeslot), *[lesson.subject for lesson in row_lessons]
+            )
+        )
+        LOGGER.info(row_format.format("", *[lesson.teacher for lesson in row_lessons]))
+        LOGGER.info(
+            row_format.format("", *[lesson.student_group for lesson in row_lessons])
+        )
         LOGGER.info(sep_format)
 
-    unassigned_lessons = [lesson for lesson in lessons if lesson.room is None or lesson.timeslot is None]
+    unassigned_lessons = [
+        lesson for lesson in lessons if lesson.room is None or lesson.timeslot is None
+    ]
     if len(unassigned_lessons) > 0:
         LOGGER.info("")
         LOGGER.info("Unassigned lessons")
         for lesson in unassigned_lessons:
-            LOGGER.info(f'    {lesson.subject} - {lesson.teacher} - {lesson.student_group}')
+            LOGGER.info(
+                f"    {lesson.subject} - {lesson.teacher} - {lesson.student_group}"
+            )
 
 
 class DemoData(Enum):
-    SMALL = 'SMALL'
-    LARGE = 'LARGE'
+    SMALL = "SMALL"
+    LARGE = "LARGE"
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

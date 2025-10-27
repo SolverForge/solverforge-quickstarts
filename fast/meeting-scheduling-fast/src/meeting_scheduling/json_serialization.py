@@ -1,5 +1,12 @@
-from blackops_legacy.solver.score import HardMediumSoftScore
-from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, BeforeValidator, ValidationInfo
+from solverforge_legacy.solver.score import HardMediumSoftScore
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    BeforeValidator,
+    ValidationInfo,
+)
 from pydantic.alias_generators import to_camel
 from typing import Annotated, Any
 
@@ -18,14 +25,16 @@ def make_list_item_validator(key: str):
 
 
 # Validators for foreign key references
-MeetingDeserializer = make_list_item_validator('meetings')
-RoomDeserializer = make_list_item_validator('rooms')
-TimeGrainDeserializer = make_list_item_validator('timeGrains')
+MeetingDeserializer = make_list_item_validator("meetings")
+RoomDeserializer = make_list_item_validator("rooms")
+TimeGrainDeserializer = make_list_item_validator("timeGrains")
 
-IdSerializer = PlainSerializer(lambda item: item.id if item is not None else None,
-                               return_type=str | None)
-ScoreSerializer = PlainSerializer(lambda score: str(score) if score is not None else None,
-                                  return_type=str | None)
+IdSerializer = PlainSerializer(
+    lambda item: item.id if item is not None else None, return_type=str | None
+)
+ScoreSerializer = PlainSerializer(
+    lambda score: str(score) if score is not None else None, return_type=str | None
+)
 
 
 def validate_score(v: Any, info: ValidationInfo) -> Any:

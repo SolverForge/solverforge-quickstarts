@@ -2,6 +2,7 @@ from typing import List
 from datetime import datetime, timedelta
 from . import domain
 
+
 # Conversion functions from domain to API models
 def location_to_model(location: domain.Location) -> List[float]:
     return [location.latitude, location.longitude]
@@ -20,8 +21,10 @@ def visit_to_model(visit: domain.Visit) -> domain.VisitModel:
         previous_visit=visit.previous_visit.id if visit.previous_visit else None,
         next_visit=visit.next_visit.id if visit.next_visit else None,
         arrival_time=visit.arrival_time.isoformat() if visit.arrival_time else None,
-        departure_time=visit.departure_time.isoformat() if visit.departure_time else None,
-        driving_time_seconds_from_previous_standstill=visit.driving_time_seconds_from_previous_standstill
+        departure_time=visit.departure_time.isoformat()
+        if visit.departure_time
+        else None,
+        driving_time_seconds_from_previous_standstill=visit.driving_time_seconds_from_previous_standstill,
     )
 
 
@@ -34,7 +37,7 @@ def vehicle_to_model(vehicle: domain.Vehicle) -> domain.VehicleModel:
         visits=[visit.id for visit in vehicle.visits],
         total_demand=vehicle.total_demand,
         total_driving_time_seconds=vehicle.total_driving_time_seconds,
-        arrival_time=vehicle.arrival_time.isoformat()
+        arrival_time=vehicle.arrival_time.isoformat(),
     )
 
 
@@ -47,7 +50,7 @@ def plan_to_model(plan: domain.VehicleRoutePlan) -> domain.VehicleRoutePlanModel
         visits=[visit_to_model(v) for v in plan.visits],
         score=str(plan.score) if plan.score else None,
         solver_status=plan.solver_status.name if plan.solver_status else None,
-        total_driving_time_seconds=plan.total_driving_time_seconds
+        total_driving_time_seconds=plan.total_driving_time_seconds,
     )
 
 
@@ -56,7 +59,9 @@ def model_to_location(model: List[float]) -> domain.Location:
     return domain.Location(latitude=model[0], longitude=model[1])
 
 
-def model_to_visit(model: domain.VisitModel, vehicle_lookup: dict, visit_lookup: dict) -> domain.Visit:
+def model_to_visit(
+    model: domain.VisitModel, vehicle_lookup: dict, visit_lookup: dict
+) -> domain.Visit:
     # Handle vehicle reference
     vehicle = None
     if model.vehicle:
@@ -93,7 +98,9 @@ def model_to_visit(model: domain.VisitModel, vehicle_lookup: dict, visit_lookup:
         vehicle=vehicle,
         previous_visit=previous_visit,
         next_visit=next_visit,
-        arrival_time=datetime.fromisoformat(model.arrival_time) if model.arrival_time else None
+        arrival_time=datetime.fromisoformat(model.arrival_time)
+        if model.arrival_time
+        else None,
     )
 
 
@@ -111,7 +118,7 @@ def model_to_vehicle(model: domain.VehicleModel, visit_lookup: dict) -> domain.V
         capacity=model.capacity,
         home_location=model_to_location(model.home_location),
         departure_time=datetime.fromisoformat(model.departure_time),
-        visits=visits
+        visits=visits,
     )
 
 
@@ -133,7 +140,9 @@ def model_to_plan(model: domain.VehicleRoutePlanModel) -> domain.VehicleRoutePla
             vehicle=None,  # Will be set later
             previous_visit=None,  # Will be set later
             next_visit=None,  # Will be set later
-            arrival_time=datetime.fromisoformat(visit_model.arrival_time) if visit_model.arrival_time else None
+            arrival_time=datetime.fromisoformat(visit_model.arrival_time)
+            if visit_model.arrival_time
+            else None,
         )
         visits.append(visit)
 
@@ -147,7 +156,7 @@ def model_to_plan(model: domain.VehicleRoutePlanModel) -> domain.VehicleRoutePla
             capacity=vehicle_model.capacity,
             home_location=model_to_location(vehicle_model.home_location),
             departure_time=datetime.fromisoformat(vehicle_model.departure_time),
-            visits=[]
+            visits=[],
         )
         vehicles.append(vehicle)
 
@@ -190,7 +199,8 @@ def model_to_plan(model: domain.VehicleRoutePlanModel) -> domain.VehicleRoutePla
     # Handle score
     score = None
     if model.score:
-        from blackops_legacy.solver.score import HardSoftScore
+        from solverforge_legacy.solver.score import HardSoftScore
+
         score = HardSoftScore.parse(model.score)
 
     # Handle solver status
@@ -205,5 +215,5 @@ def model_to_plan(model: domain.VehicleRoutePlanModel) -> domain.VehicleRoutePla
         vehicles=vehicles,
         visits=visits,
         score=score,
-        solver_status=solver_status
+        solver_status=solver_status,
     )

@@ -1,8 +1,14 @@
-from blackops_legacy.solver.score import HardSoftScore
+from solverforge_legacy.solver.score import HardSoftScore
 
 from typing import Any
 from datetime import timedelta
-from pydantic import BaseModel, ConfigDict, PlainSerializer, BeforeValidator, ValidationInfo
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    PlainSerializer,
+    BeforeValidator,
+    ValidationInfo,
+)
 from pydantic.alias_generators import to_camel
 
 
@@ -45,18 +51,27 @@ def make_id_list_item_validator(key: str):
     return BeforeValidator(validator)
 
 
-LocationSerializer = PlainSerializer(lambda location: [
-    location.latitude,
-    location.longitude,
-], return_type=list[float])
+LocationSerializer = PlainSerializer(
+    lambda location: [
+        location.latitude,
+        location.longitude,
+    ],
+    return_type=list[float],
+)
 ScoreSerializer = PlainSerializer(lambda score: str(score), return_type=str)
-IdSerializer = PlainSerializer(lambda item: item.id if item is not None else None, return_type=str | None)
-IdListSerializer = PlainSerializer(lambda items: [item.id for item in items], return_type=list)
-DurationSerializer = PlainSerializer(lambda duration: duration // timedelta(seconds=1), return_type=int)
+IdSerializer = PlainSerializer(
+    lambda item: item.id if item is not None else None, return_type=str | None
+)
+IdListSerializer = PlainSerializer(
+    lambda items: [item.id for item in items], return_type=list
+)
+DurationSerializer = PlainSerializer(
+    lambda duration: duration // timedelta(seconds=1), return_type=int
+)
 
-VisitListValidator = make_id_list_item_validator('visits')
-VisitValidator = make_id_item_validator('visits')
-VehicleValidator = make_id_item_validator('vehicles')
+VisitListValidator = make_id_list_item_validator("visits")
+VisitValidator = make_id_item_validator("visits")
+VehicleValidator = make_id_item_validator("vehicles")
 
 
 def validate_score(v: Any, info: ValidationInfo) -> Any:

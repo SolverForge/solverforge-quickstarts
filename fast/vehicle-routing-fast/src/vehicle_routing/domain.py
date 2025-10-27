@@ -1,6 +1,6 @@
-from blackops_legacy.solver import SolverStatus
-from blackops_legacy.solver.score import HardSoftScore
-from blackops_legacy.solver.domain import *
+from solverforge_legacy.solver import SolverStatus
+from solverforge_legacy.solver.score import HardSoftScore
+from solverforge_legacy.solver.domain import *
 
 from datetime import datetime, timedelta
 from typing import Annotated, Optional, List, Union
@@ -14,17 +14,21 @@ class Location:
     latitude: float
     longitude: float
 
-    def driving_time_to(self, other: 'Location') -> int:
-        return round((
-             (self.latitude - other.latitude) ** 2 +
-             (self.longitude - other.longitude) ** 2
-         ) ** 0.5 * 4_000)
+    def driving_time_to(self, other: "Location") -> int:
+        return round(
+            (
+                (self.latitude - other.latitude) ** 2
+                + (self.longitude - other.longitude) ** 2
+            )
+            ** 0.5
+            * 4_000
+        )
 
     def __str__(self):
-        return f'[{self.latitude}, {self.longitude}]'
+        return f"[{self.latitude}, {self.longitude}]"
 
     def __repr__(self):
-        return f'Location({self.latitude}, {self.longitude})'
+        return f"Location({self.latitude}, {self.longitude})"
 
 
 @planning_entity
@@ -37,25 +41,37 @@ class Visit:
     min_start_time: datetime
     max_end_time: datetime
     service_duration: timedelta
-    vehicle: Annotated[Optional['Vehicle'],
-                       InverseRelationShadowVariable(source_variable_name='visits')] = None
-    previous_visit: Annotated[Optional['Visit'],
-                              PreviousElementShadowVariable(source_variable_name='visits')] = None
-    next_visit: Annotated[Optional['Visit'],
-                          NextElementShadowVariable(source_variable_name='visits')] = None
+    vehicle: Annotated[
+        Optional["Vehicle"],
+        InverseRelationShadowVariable(source_variable_name="visits"),
+    ] = None
+    previous_visit: Annotated[
+        Optional["Visit"], PreviousElementShadowVariable(source_variable_name="visits")
+    ] = None
+    next_visit: Annotated[
+        Optional["Visit"], NextElementShadowVariable(source_variable_name="visits")
+    ] = None
     arrival_time: Annotated[
         Optional[datetime],
-        CascadingUpdateShadowVariable(target_method_name='update_arrival_time')] = None
+        CascadingUpdateShadowVariable(target_method_name="update_arrival_time"),
+    ] = None
 
     def update_arrival_time(self):
-        if self.vehicle is None or (self.previous_visit is not None and self.previous_visit.arrival_time is None):
+        if self.vehicle is None or (
+            self.previous_visit is not None and self.previous_visit.arrival_time is None
+        ):
             self.arrival_time = None
         elif self.previous_visit is None:
-            self.arrival_time = (self.vehicle.departure_time +
-                                 timedelta(seconds=self.vehicle.home_location.driving_time_to(self.location)))
+            self.arrival_time = self.vehicle.departure_time + timedelta(
+                seconds=self.vehicle.home_location.driving_time_to(self.location)
+            )
         else:
-            self.arrival_time = (self.previous_visit.calculate_departure_time() +
-                                 timedelta(seconds=self.previous_visit.location.driving_time_to(self.location)))
+            self.arrival_time = (
+                self.previous_visit.calculate_departure_time()
+                + timedelta(
+                    seconds=self.previous_visit.location.driving_time_to(self.location)
+                )
+            )
 
     def calculate_departure_time(self):
         if self.arrival_time is None:
@@ -74,7 +90,10 @@ class Visit:
         return max(self.arrival_time, self.min_start_time)
 
     def is_service_finished_after_max_end_time(self) -> bool:
-        return self.arrival_time is not None and self.calculate_departure_time() > self.max_end_time
+        return (
+            self.arrival_time is not None
+            and self.calculate_departure_time() > self.max_end_time
+        )
 
     def service_finished_delay_in_minutes(self) -> int:
         if self.arrival_time is None:
@@ -84,7 +103,10 @@ class Visit:
         # ex: 30 seconds / -1 minute = -0.5,
         # so 30 seconds // -1 minute = -1,
         # and negating that gives 1
-        return -((self.calculate_departure_time() - self.max_end_time) // timedelta(minutes=-1))
+        return -(
+            (self.calculate_departure_time() - self.max_end_time)
+            // timedelta(minutes=-1)
+        )
 
     @property
     def driving_time_seconds_from_previous_standstill(self) -> Optional[int]:
@@ -100,7 +122,7 @@ class Visit:
         return self.id
 
     def __repr__(self):
-        return f'Visit({self.id})'
+        return f"Visit({self.id})"
 
 
 @planning_entity
@@ -110,15 +132,15 @@ class Vehicle:
     capacity: int
     home_location: Location
     departure_time: datetime
-    visits: Annotated[list[Visit],
-                      PlanningListVariable] = field(default_factory=list)
+    visits: Annotated[list[Visit], PlanningListVariable] = field(default_factory=list)
 
     @property
     def arrival_time(self) -> datetime:
         if len(self.visits) == 0:
             return self.departure_time
-        return (self.visits[-1].departure_time +
-                timedelta(seconds=self.visits[-1].location.driving_time_to(self.home_location)))
+        return self.visits[-1].departure_time + timedelta(
+            seconds=self.visits[-1].location.driving_time_to(self.home_location)
+        )
 
     @property
     def total_demand(self) -> int:
@@ -141,17 +163,21 @@ class Vehicle:
         previous_location = self.home_location
 
         for visit in self.visits:
-            total_driving_time_seconds += previous_location.driving_time_to(visit.location)
+            total_driving_time_seconds += previous_location.driving_time_to(
+                visit.location
+            )
             previous_location = visit.location
 
-        total_driving_time_seconds += previous_location.driving_time_to(self.home_location)
+        total_driving_time_seconds += previous_location.driving_time_to(
+            self.home_location
+        )
         return total_driving_time_seconds
 
     def __str__(self):
         return self.id
 
     def __repr__(self):
-        return f'Vehicle({self.id})'
+        return f"Vehicle({self.id})"
 
 
 @planning_solution
@@ -173,7 +199,7 @@ class VehicleRoutePlan:
         return out
 
     def __str__(self):
-        return f'VehicleRoutePlan(name={self.name}, vehicles={self.vehicles}, visits={self.visits})'
+        return f"VehicleRoutePlan(name={self.name}, vehicles={self.vehicles}, visits={self.visits})"
 
 
 # Pydantic REST models for API (used for deserialization and context)
@@ -188,14 +214,20 @@ class VisitModel(JsonDomainBase):
     location: List[float]  # [lat, lng] array
     demand: int
     min_start_time: str = Field(..., alias="minStartTime")  # ISO datetime string
-    max_end_time: str = Field(..., alias="maxEndTime")    # ISO datetime string
+    max_end_time: str = Field(..., alias="maxEndTime")  # ISO datetime string
     service_duration: int = Field(..., alias="serviceDuration")  # Duration in seconds
-    vehicle: Union[str, 'VehicleModel', None] = None
-    previous_visit: Union[str, 'VisitModel', None] = Field(None, alias="previousVisit")
-    next_visit: Union[str, 'VisitModel', None] = Field(None, alias="nextVisit")
-    arrival_time: Optional[str] = Field(None, alias="arrivalTime")  # ISO datetime string
-    departure_time: Optional[str] = Field(None, alias="departureTime")  # ISO datetime string
-    driving_time_seconds_from_previous_standstill: Optional[int] = Field(None, alias="drivingTimeSecondsFromPreviousStandstill")
+    vehicle: Union[str, "VehicleModel", None] = None
+    previous_visit: Union[str, "VisitModel", None] = Field(None, alias="previousVisit")
+    next_visit: Union[str, "VisitModel", None] = Field(None, alias="nextVisit")
+    arrival_time: Optional[str] = Field(
+        None, alias="arrivalTime"
+    )  # ISO datetime string
+    departure_time: Optional[str] = Field(
+        None, alias="departureTime"
+    )  # ISO datetime string
+    driving_time_seconds_from_previous_standstill: Optional[int] = Field(
+        None, alias="drivingTimeSecondsFromPreviousStandstill"
+    )
 
 
 class VehicleModel(JsonDomainBase):
@@ -206,13 +238,19 @@ class VehicleModel(JsonDomainBase):
     visits: List[Union[str, VisitModel]] = Field(default_factory=list)
     total_demand: int = Field(0, alias="totalDemand")
     total_driving_time_seconds: int = Field(0, alias="totalDrivingTimeSeconds")
-    arrival_time: Optional[str] = Field(None, alias="arrivalTime")  # ISO datetime string
+    arrival_time: Optional[str] = Field(
+        None, alias="arrivalTime"
+    )  # ISO datetime string
 
 
 class VehicleRoutePlanModel(JsonDomainBase):
     name: str
-    south_west_corner: List[float] = Field(..., alias="southWestCorner")  # [lat, lng] array
-    north_east_corner: List[float] = Field(..., alias="northEastCorner")  # [lat, lng] array
+    south_west_corner: List[float] = Field(
+        ..., alias="southWestCorner"
+    )  # [lat, lng] array
+    north_east_corner: List[float] = Field(
+        ..., alias="northEastCorner"
+    )  # [lat, lng] array
     vehicles: List[VehicleModel]
     visits: List[VisitModel]
     score: Optional[str] = None

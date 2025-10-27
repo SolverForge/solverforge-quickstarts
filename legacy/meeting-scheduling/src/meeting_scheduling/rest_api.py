@@ -5,14 +5,14 @@ from uuid import uuid4
 from fastapi.encoders import jsonable_encoder
 import json
 
-from blackops_legacy.solver import SolverManager, SolutionManager
+from solverforge_legacy.solver import SolverManager, SolutionManager
 
 from .domain import *
 from .demo_data import generate_demo_data
 from .solver import solver_manager, solution_manager
 from .score_analysis import ConstraintAnalysisDTO, MatchAnalysisDTO
 
-app = FastAPI(docs_url='/q/swagger-ui')
+app = FastAPI(docs_url="/q/swagger-ui")
 
 # Dictionary to store submitted data sets
 data_sets: Dict[str, MeetingSchedule] = {}
@@ -56,9 +56,9 @@ async def get_status(problem_id: str) -> Dict:
         "score": {
             "hardScore": schedule.score.hard_score if schedule.score else 0,
             "mediumScore": schedule.score.medium_score if schedule.score else 0,
-            "softScore": schedule.score.soft_score if schedule.score else 0
+            "softScore": schedule.score.soft_score if schedule.score else 0,
         },
-        "solverStatus": solver_status.name
+        "solverStatus": solver_status.name,
     }
 
 
@@ -88,22 +88,23 @@ async def solve_schedule(request: Request) -> str:
     job_id = str(uuid4())
 
     # Create lookup dictionaries for validation context - use the SAME instances
-    people = {p['id']: Person.model_validate(p) for p in json_data.get('people', [])}
-    rooms = {r['id']: Room.model_validate(r) for r in json_data.get('rooms', [])}
-    time_grains = {tg['id']: TimeGrain.model_validate(tg) for tg in json_data.get('timeGrains', [])}
-
-    # Create the full validation context
-    validation_context = {
-        'people': people,
-        'rooms': rooms,
-        'timeGrains': time_grains
+    people = {p["id"]: Person.model_validate(p) for p in json_data.get("people", [])}
+    rooms = {r["id"]: Room.model_validate(r) for r in json_data.get("rooms", [])}
+    time_grains = {
+        tg["id"]: TimeGrain.model_validate(tg) for tg in json_data.get("timeGrains", [])
     }
 
+    # Create the full validation context
+    validation_context = {"people": people, "rooms": rooms, "timeGrains": time_grains}
+
     # Validate meetings with proper context for person resolution
-    meetings = {m['id']: Meeting.model_validate(m, context=validation_context) for m in json_data.get('meetings', [])}
+    meetings = {
+        m["id"]: Meeting.model_validate(m, context=validation_context)
+        for m in json_data.get("meetings", [])
+    }
 
     # Add meetings to context for MeetingAssignment validation
-    validation_context['meetings'] = meetings
+    validation_context["meetings"] = meetings
 
     # Parse the incoming JSON with proper context for deserialization
     # Use the SAME people, rooms, time_grains instances to avoid duplicate objects
@@ -111,9 +112,7 @@ async def solve_schedule(request: Request) -> str:
 
     data_sets[job_id] = schedule
     solver_manager.solve_and_listen(
-        job_id,
-        schedule,
-        lambda solution: update_schedule(job_id, solution)
+        job_id, schedule, lambda solution: update_schedule(job_id, solution)
     )
     return job_id
 
@@ -124,22 +123,23 @@ async def analyze_schedule(request: Request) -> Dict:
     json_data = await request.json()
 
     # Create lookup dictionaries for validation context
-    people = {p['id']: Person.model_validate(p) for p in json_data.get('people', [])}
-    rooms = {r['id']: Room.model_validate(r) for r in json_data.get('rooms', [])}
-    time_grains = {tg['id']: TimeGrain.model_validate(tg) for tg in json_data.get('timeGrains', [])}
-
-    # Create the full validation context
-    validation_context = {
-        'people': people,
-        'rooms': rooms,
-        'timeGrains': time_grains
+    people = {p["id"]: Person.model_validate(p) for p in json_data.get("people", [])}
+    rooms = {r["id"]: Room.model_validate(r) for r in json_data.get("rooms", [])}
+    time_grains = {
+        tg["id"]: TimeGrain.model_validate(tg) for tg in json_data.get("timeGrains", [])
     }
 
+    # Create the full validation context
+    validation_context = {"people": people, "rooms": rooms, "timeGrains": time_grains}
+
     # Validate meetings with proper context for person resolution
-    meetings = {m['id']: Meeting.model_validate(m, context=validation_context) for m in json_data.get('meetings', [])}
+    meetings = {
+        m["id"]: Meeting.model_validate(m, context=validation_context)
+        for m in json_data.get("meetings", [])
+    }
 
     # Add meetings to context for MeetingAssignment validation
-    validation_context['meetings'] = meetings
+    validation_context["meetings"] = meetings
 
     # Parse the incoming JSON with proper context
     schedule = MeetingSchedule.model_validate(json_data, context=validation_context)
@@ -153,7 +153,7 @@ async def analyze_schedule(request: Request) -> Dict:
             MatchAnalysisDTO(
                 name=match.constraint_ref.constraint_name,
                 score=match.score,
-                justification=match.justification
+                justification=match.justification,
             )
             for match in constraint.matches
         ]
@@ -162,13 +162,11 @@ async def analyze_schedule(request: Request) -> Dict:
             name=constraint.constraint_name,
             weight=constraint.weight,
             score=constraint.score,
-            matches=matches
+            matches=matches,
         )
         constraints.append(constraint_dto)
 
-    return {
-        "constraints": [constraint.model_dump() for constraint in constraints]
-    }
+    return {"constraints": [constraint.model_dump() for constraint in constraints]}
 
 
 # Mount static files

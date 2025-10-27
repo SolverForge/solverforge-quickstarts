@@ -1,5 +1,15 @@
-from blackops_legacy.solver.score import HardMediumSoftDecimalScore, ConstraintJustification
-from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, BeforeValidator, ValidationInfo
+from solverforge_legacy.solver.score import (
+    HardMediumSoftDecimalScore,
+    ConstraintJustification,
+)
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    BeforeValidator,
+    ValidationInfo,
+)
 from pydantic.alias_generators import to_camel
 from typing import Any, Dict
 
@@ -17,16 +27,19 @@ def make_list_item_validator(key: str):
     return BeforeValidator(validator)
 
 
-TeamDeserializer = make_list_item_validator('teams')
-DayDeserializer = make_list_item_validator('days')
+TeamDeserializer = make_list_item_validator("teams")
+DayDeserializer = make_list_item_validator("days")
 
 
 IdSerializer = PlainSerializer(
-    lambda item: getattr(item, 'id', getattr(item, 'date_index', None)) if item is not None else None,
-    return_type=int | None
+    lambda item: getattr(item, "id", getattr(item, "date_index", None))
+    if item is not None
+    else None,
+    return_type=int | None,
 )
-ScoreSerializer = PlainSerializer(lambda score: str(score) if score is not None else None,
-                                  return_type=str | None)
+ScoreSerializer = PlainSerializer(
+    lambda score: str(score) if score is not None else None, return_type=str | None
+)
 
 
 def validate_score(v: Any, info: ValidationInfo) -> Any:
@@ -38,6 +51,7 @@ def validate_score(v: Any, info: ValidationInfo) -> Any:
 
 
 ScoreValidator = BeforeValidator(validate_score)
+
 
 class JsonDomainBase(BaseModel):
     model_config = ConfigDict(

@@ -1,6 +1,6 @@
-from blackops_legacy.solver import SolverStatus
-from blackops_legacy.solver.domain import *
-from blackops_legacy.solver.score import HardSoftDecimalScore
+from solverforge_legacy.solver import SolverStatus
+from solverforge_legacy.solver.domain import *
+from solverforge_legacy.solver.score import HardSoftDecimalScore
 from datetime import datetime, date
 from typing import Annotated
 from pydantic import Field
@@ -23,15 +23,20 @@ class Shift(JsonDomainBase):
     end: datetime
     location: str
     required_skill: str
-    employee: Annotated[Employee | None,
-                        PlanningVariable,
-                        Field(default=None)]
+    employee: Annotated[Employee | None, PlanningVariable, Field(default=None)]
 
 
 @planning_solution
 class EmployeeSchedule(JsonDomainBase):
-    employees: Annotated[list[Employee], ProblemFactCollectionProperty, ValueRangeProvider]
+    employees: Annotated[
+        list[Employee], ProblemFactCollectionProperty, ValueRangeProvider
+    ]
     shifts: Annotated[list[Shift], PlanningEntityCollectionProperty]
-    score: Annotated[HardSoftDecimalScore | None,
-                     PlanningScore, ScoreSerializer, ScoreValidator, Field(default=None)]
+    score: Annotated[
+        HardSoftDecimalScore | None,
+        PlanningScore,
+        ScoreSerializer,
+        ScoreValidator,
+        Field(default=None),
+    ]
     solver_status: Annotated[SolverStatus | None, Field(default=None)]

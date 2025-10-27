@@ -1,7 +1,13 @@
-from blackops_legacy.solver.score import (constraint_provider, HardMediumSoftScore, Joiners,
-                                   ConstraintFactory, Constraint)
+from solverforge_legacy.solver.score import (
+    constraint_provider,
+    HardMediumSoftScore,
+    Joiners,
+    ConstraintFactory,
+    Constraint,
+)
 
 from .domain import *
+
 
 @constraint_provider
 def define_constraints(constraint_factory: ConstraintFactory):
@@ -28,12 +34,14 @@ def define_constraints(constraint_factory: ConstraintFactory):
         one_break_between_consecutive_meetings(constraint_factory),
         overlapping_meetings(constraint_factory),
         assign_larger_rooms_first(constraint_factory),
-        room_stability(constraint_factory)
+        room_stability(constraint_factory),
     ]
+
 
 # ************************************************************************
 # Hard constraints
 # ************************************************************************
+
 
 def room_conflict(constraint_factory: ConstraintFactory) -> Constraint:
     """
@@ -46,14 +54,22 @@ def room_conflict(constraint_factory: ConstraintFactory) -> Constraint:
     Returns:
         Constraint: The defined constraint.
     """
-    return (constraint_factory
-            .for_each_unique_pair(MeetingAssignment,
-                                 Joiners.equal(lambda assignment: assignment.room),
-                                 Joiners.overlapping(lambda assignment: assignment.get_grain_index(),
-                                                    lambda assignment: assignment.get_last_time_grain_index() + 1))
-            .penalize(HardMediumSoftScore.ONE_HARD,
-                     lambda left_assignment, right_assignment: right_assignment.calculate_overlap(left_assignment))
-            .as_constraint("Room conflict"))
+    return (
+        constraint_factory.for_each_unique_pair(
+            MeetingAssignment,
+            Joiners.equal(lambda assignment: assignment.room),
+            Joiners.overlapping(
+                lambda assignment: assignment.get_grain_index(),
+                lambda assignment: assignment.get_last_time_grain_index() + 1,
+            ),
+        )
+        .penalize(
+            HardMediumSoftScore.ONE_HARD,
+            lambda left_assignment,
+            right_assignment: right_assignment.calculate_overlap(left_assignment),
+        )
+        .as_constraint("Room conflict")
+    )
 
 
 def avoid_overtime(constraint_factory: ConstraintFactory) -> Constraint:
@@ -67,15 +83,25 @@ def avoid_overtime(constraint_factory: ConstraintFactory) -> Constraint:
     Returns:
         Constraint: The defined constraint.
     """
-    return (constraint_factory
-            .for_each_including_unassigned(MeetingAssignment)
-            .filter(lambda meeting_assignment: meeting_assignment.starting_time_grain is not None)
-            .if_not_exists(TimeGrain,
-                          Joiners.equal(lambda assignment: assignment.get_last_time_grain_index(),
-                                       lambda time_grain: time_grain.grain_index))
-            .penalize(HardMediumSoftScore.ONE_HARD,
-                     lambda meeting_assignment: meeting_assignment.get_last_time_grain_index())
-            .as_constraint("Don't go in overtime"))
+    return (
+        constraint_factory.for_each_including_unassigned(MeetingAssignment)
+        .filter(
+            lambda meeting_assignment: meeting_assignment.starting_time_grain
+            is not None
+        )
+        .if_not_exists(
+            TimeGrain,
+            Joiners.equal(
+                lambda assignment: assignment.get_last_time_grain_index(),
+                lambda time_grain: time_grain.grain_index,
+            ),
+        )
+        .penalize(
+            HardMediumSoftScore.ONE_HARD,
+            lambda meeting_assignment: meeting_assignment.get_last_time_grain_index(),
+        )
+        .as_constraint("Don't go in overtime")
+    )
 
 
 def required_attendance_conflict(constraint_factory: ConstraintFactory) -> Constraint:
@@ -89,23 +115,43 @@ def required_attendance_conflict(constraint_factory: ConstraintFactory) -> Const
     Returns:
         Constraint: The defined constraint.
     """
-    return (constraint_factory
-            .for_each_unique_pair(RequiredAttendance,
-                                 Joiners.equal(lambda attendance: attendance.person))
-            .join(MeetingAssignment,
-                 Joiners.equal(lambda left_required, right_required: left_required.meeting_id,
-                              lambda assignment: assignment.meeting.id))
-            .join(MeetingAssignment,
-                 Joiners.equal(lambda left_required, right_required, left_assignment: right_required.meeting_id,
-                              lambda assignment: assignment.meeting.id),
-                 Joiners.overlapping(lambda attendee1, attendee2, assignment: assignment.get_grain_index(),
-                                    lambda attendee1, attendee2, assignment: assignment.get_last_time_grain_index() + 1,
-                                    lambda assignment: assignment.get_grain_index(),
-                                    lambda assignment: assignment.get_last_time_grain_index() + 1))
-            .penalize(HardMediumSoftScore.ONE_HARD,
-                     lambda left_required, right_required, left_assignment, right_assignment:
-                     right_assignment.calculate_overlap(left_assignment))
-            .as_constraint("Required attendance conflict"))
+    return (
+        constraint_factory.for_each_unique_pair(
+            RequiredAttendance, Joiners.equal(lambda attendance: attendance.person)
+        )
+        .join(
+            MeetingAssignment,
+            Joiners.equal(
+                lambda left_required, right_required: left_required.meeting_id,
+                lambda assignment: assignment.meeting.id,
+            ),
+        )
+        .join(
+            MeetingAssignment,
+            Joiners.equal(
+                lambda left_required,
+                right_required,
+                left_assignment: right_required.meeting_id,
+                lambda assignment: assignment.meeting.id,
+            ),
+            Joiners.overlapping(
+                lambda attendee1, attendee2, assignment: assignment.get_grain_index(),
+                lambda attendee1,
+                attendee2,
+                assignment: assignment.get_last_time_grain_index() + 1,
+                lambda assignment: assignment.get_grain_index(),
+                lambda assignment: assignment.get_last_time_grain_index() + 1,
+            ),
+        )
+        .penalize(
+            HardMediumSoftScore.ONE_HARD,
+            lambda left_required,
+            right_required,
+            left_assignment,
+            right_assignment: right_assignment.calculate_overlap(left_assignment),
+        )
+        .as_constraint("Required attendance conflict")
+    )
 
 
 def required_room_capacity(constraint_factory: ConstraintFactory) -> Constraint:
@@ -119,12 +165,19 @@ def required_room_capacity(constraint_factory: ConstraintFactory) -> Constraint:
     Returns:
         Constraint: The defined constraint.
     """
-    return (constraint_factory
-            .for_each_including_unassigned(MeetingAssignment)
-            .filter(lambda meeting_assignment: meeting_assignment.get_required_capacity() > meeting_assignment.get_room_capacity())
-            .penalize(HardMediumSoftScore.ONE_HARD,
-                     lambda meeting_assignment: meeting_assignment.get_required_capacity() - meeting_assignment.get_room_capacity())
-            .as_constraint("Required room capacity"))
+    return (
+        constraint_factory.for_each_including_unassigned(MeetingAssignment)
+        .filter(
+            lambda meeting_assignment: meeting_assignment.get_required_capacity()
+            > meeting_assignment.get_room_capacity()
+        )
+        .penalize(
+            HardMediumSoftScore.ONE_HARD,
+            lambda meeting_assignment: meeting_assignment.get_required_capacity()
+            - meeting_assignment.get_room_capacity(),
+        )
+        .as_constraint("Required room capacity")
+    )
 
 
 def start_and_end_on_same_day(constraint_factory: ConstraintFactory) -> Constraint:
@@ -138,23 +191,37 @@ def start_and_end_on_same_day(constraint_factory: ConstraintFactory) -> Constrai
     Returns:
         Constraint: The defined constraint.
     """
-    return (constraint_factory
-            .for_each_including_unassigned(MeetingAssignment)
-            .filter(lambda meeting_assignment: meeting_assignment.starting_time_grain is not None)
-            .join(TimeGrain,
-                 Joiners.equal(lambda meeting_assignment: meeting_assignment.get_last_time_grain_index(),
-                              lambda time_grain: time_grain.grain_index),
-                 Joiners.filtering(lambda meeting_assignment, time_grain:
-                                  meeting_assignment.starting_time_grain.day_of_year != time_grain.day_of_year))
-            .penalize(HardMediumSoftScore.ONE_HARD)
-            .as_constraint("Start and end on same day"))
+    return (
+        constraint_factory.for_each_including_unassigned(MeetingAssignment)
+        .filter(
+            lambda meeting_assignment: meeting_assignment.starting_time_grain
+            is not None
+        )
+        .join(
+            TimeGrain,
+            Joiners.equal(
+                lambda meeting_assignment: meeting_assignment.get_last_time_grain_index(),
+                lambda time_grain: time_grain.grain_index,
+            ),
+            Joiners.filtering(
+                lambda meeting_assignment,
+                time_grain: meeting_assignment.starting_time_grain.day_of_year
+                != time_grain.day_of_year
+            ),
+        )
+        .penalize(HardMediumSoftScore.ONE_HARD)
+        .as_constraint("Start and end on same day")
+    )
 
 
 # ************************************************************************
 # Medium constraints
 # ************************************************************************
 
-def required_and_preferred_attendance_conflict(constraint_factory: ConstraintFactory) -> Constraint:
+
+def required_and_preferred_attendance_conflict(
+    constraint_factory: ConstraintFactory,
+) -> Constraint:
     """
     Medium constraint: Discourages conflicts between required and preferred attendance for the same person.
 
@@ -165,25 +232,45 @@ def required_and_preferred_attendance_conflict(constraint_factory: ConstraintFac
     Returns:
         Constraint: The defined constraint.
     """
-    return (constraint_factory
-            .for_each(RequiredAttendance)
-            .join(PreferredAttendance,
-                 Joiners.equal(lambda required: required.person,
-                              lambda preferred: preferred.person))
-            .join(MeetingAssignment,
-                 Joiners.equal(lambda required, preferred: required.meeting_id,
-                              lambda assignment: assignment.meeting.id))
-            .join(MeetingAssignment,
-                 Joiners.equal(lambda required, preferred, left_assignment: preferred.meeting_id,
-                              lambda assignment: assignment.meeting.id),
-                 Joiners.overlapping(lambda required, preferred, assignment: assignment.get_grain_index(),
-                                    lambda required, preferred, assignment: assignment.get_last_time_grain_index() + 1,
-                                    lambda assignment: assignment.get_grain_index(),
-                                    lambda assignment: assignment.get_last_time_grain_index() + 1))
-            .penalize(HardMediumSoftScore.ONE_MEDIUM,
-                     lambda required, preferred, left_assignment, right_assignment:
-                     right_assignment.calculate_overlap(left_assignment))
-            .as_constraint("Required and preferred attendance conflict"))
+    return (
+        constraint_factory.for_each(RequiredAttendance)
+        .join(
+            PreferredAttendance,
+            Joiners.equal(
+                lambda required: required.person, lambda preferred: preferred.person
+            ),
+        )
+        .join(
+            MeetingAssignment,
+            Joiners.equal(
+                lambda required, preferred: required.meeting_id,
+                lambda assignment: assignment.meeting.id,
+            ),
+        )
+        .join(
+            MeetingAssignment,
+            Joiners.equal(
+                lambda required, preferred, left_assignment: preferred.meeting_id,
+                lambda assignment: assignment.meeting.id,
+            ),
+            Joiners.overlapping(
+                lambda required, preferred, assignment: assignment.get_grain_index(),
+                lambda required,
+                preferred,
+                assignment: assignment.get_last_time_grain_index() + 1,
+                lambda assignment: assignment.get_grain_index(),
+                lambda assignment: assignment.get_last_time_grain_index() + 1,
+            ),
+        )
+        .penalize(
+            HardMediumSoftScore.ONE_MEDIUM,
+            lambda required,
+            preferred,
+            left_assignment,
+            right_assignment: right_assignment.calculate_overlap(left_assignment),
+        )
+        .as_constraint("Required and preferred attendance conflict")
+    )
 
 
 def preferred_attendance_conflict(constraint_factory: ConstraintFactory) -> Constraint:
@@ -197,30 +284,53 @@ def preferred_attendance_conflict(constraint_factory: ConstraintFactory) -> Cons
     Returns:
         Constraint: The defined constraint.
     """
-    return (constraint_factory
-            .for_each_unique_pair(PreferredAttendance,
-                                 Joiners.equal(lambda attendance: attendance.person))
-            .join(MeetingAssignment,
-                 Joiners.equal(lambda left_attendance, right_attendance: left_attendance.meeting_id,
-                              lambda assignment: assignment.meeting.id))
-            .join(MeetingAssignment,
-                 Joiners.equal(lambda left_attendance, right_attendance, left_assignment: right_attendance.meeting_id,
-                              lambda assignment: assignment.meeting.id),
-                 Joiners.overlapping(lambda attendee1, attendee2, assignment: assignment.get_grain_index(),
-                                    lambda attendee1, attendee2, assignment: assignment.get_last_time_grain_index() + 1,
-                                    lambda assignment: assignment.get_grain_index(),
-                                    lambda assignment: assignment.get_last_time_grain_index() + 1))
-            .penalize(HardMediumSoftScore.ONE_MEDIUM,
-                     lambda left_attendance, right_attendance, left_assignment, right_assignment:
-                     right_assignment.calculate_overlap(left_assignment))
-            .as_constraint("Preferred attendance conflict"))
+    return (
+        constraint_factory.for_each_unique_pair(
+            PreferredAttendance, Joiners.equal(lambda attendance: attendance.person)
+        )
+        .join(
+            MeetingAssignment,
+            Joiners.equal(
+                lambda left_attendance, right_attendance: left_attendance.meeting_id,
+                lambda assignment: assignment.meeting.id,
+            ),
+        )
+        .join(
+            MeetingAssignment,
+            Joiners.equal(
+                lambda left_attendance,
+                right_attendance,
+                left_assignment: right_attendance.meeting_id,
+                lambda assignment: assignment.meeting.id,
+            ),
+            Joiners.overlapping(
+                lambda attendee1, attendee2, assignment: assignment.get_grain_index(),
+                lambda attendee1,
+                attendee2,
+                assignment: assignment.get_last_time_grain_index() + 1,
+                lambda assignment: assignment.get_grain_index(),
+                lambda assignment: assignment.get_last_time_grain_index() + 1,
+            ),
+        )
+        .penalize(
+            HardMediumSoftScore.ONE_MEDIUM,
+            lambda left_attendance,
+            right_attendance,
+            left_assignment,
+            right_assignment: right_assignment.calculate_overlap(left_assignment),
+        )
+        .as_constraint("Preferred attendance conflict")
+    )
 
 
 # ************************************************************************
 # Soft constraints
 # ************************************************************************
 
-def do_meetings_as_soon_as_possible(constraint_factory: ConstraintFactory) -> Constraint:
+
+def do_meetings_as_soon_as_possible(
+    constraint_factory: ConstraintFactory,
+) -> Constraint:
     """
     Soft constraint: Encourages scheduling meetings earlier in the available time slots.
 
@@ -231,15 +341,23 @@ def do_meetings_as_soon_as_possible(constraint_factory: ConstraintFactory) -> Co
     Returns:
         Constraint: The defined constraint.
     """
-    return (constraint_factory
-            .for_each_including_unassigned(MeetingAssignment)
-            .filter(lambda meeting_assignment: meeting_assignment.starting_time_grain is not None)
-            .penalize(HardMediumSoftScore.ONE_SOFT,
-                     lambda meeting_assignment: meeting_assignment.get_last_time_grain_index())
-            .as_constraint("Do all meetings as soon as possible"))
+    return (
+        constraint_factory.for_each_including_unassigned(MeetingAssignment)
+        .filter(
+            lambda meeting_assignment: meeting_assignment.starting_time_grain
+            is not None
+        )
+        .penalize(
+            HardMediumSoftScore.ONE_SOFT,
+            lambda meeting_assignment: meeting_assignment.get_last_time_grain_index(),
+        )
+        .as_constraint("Do all meetings as soon as possible")
+    )
 
 
-def one_break_between_consecutive_meetings(constraint_factory: ConstraintFactory) -> Constraint:
+def one_break_between_consecutive_meetings(
+    constraint_factory: ConstraintFactory,
+) -> Constraint:
     """
     Soft constraint: Penalizes consecutive meetings without a break.
 
@@ -250,15 +368,24 @@ def one_break_between_consecutive_meetings(constraint_factory: ConstraintFactory
     Returns:
         Constraint: The defined constraint.
     """
-    return (constraint_factory
-            .for_each_including_unassigned(MeetingAssignment)
-            .filter(lambda meeting_assignment: meeting_assignment.starting_time_grain is not None)
-            .join(constraint_factory.for_each_including_unassigned(MeetingAssignment)
-                  .filter(lambda assignment: assignment.starting_time_grain is not None),
-                  Joiners.equal(lambda left_assignment: left_assignment.get_last_time_grain_index(),
-                               lambda right_assignment: right_assignment.get_grain_index() - 1))
-            .penalize(HardMediumSoftScore.of_soft(100))
-            .as_constraint("One TimeGrain break between two consecutive meetings"))
+    return (
+        constraint_factory.for_each_including_unassigned(MeetingAssignment)
+        .filter(
+            lambda meeting_assignment: meeting_assignment.starting_time_grain
+            is not None
+        )
+        .join(
+            constraint_factory.for_each_including_unassigned(MeetingAssignment).filter(
+                lambda assignment: assignment.starting_time_grain is not None
+            ),
+            Joiners.equal(
+                lambda left_assignment: left_assignment.get_last_time_grain_index(),
+                lambda right_assignment: right_assignment.get_grain_index() - 1,
+            ),
+        )
+        .penalize(HardMediumSoftScore.of_soft(100))
+        .as_constraint("One TimeGrain break between two consecutive meetings")
+    )
 
 
 def overlapping_meetings(constraint_factory: ConstraintFactory) -> Constraint:
@@ -272,18 +399,34 @@ def overlapping_meetings(constraint_factory: ConstraintFactory) -> Constraint:
     Returns:
         Constraint: The defined constraint.
     """
-    return (constraint_factory
-            .for_each_including_unassigned(MeetingAssignment)
-            .filter(lambda meeting_assignment: meeting_assignment.starting_time_grain is not None)
-            .join(constraint_factory.for_each_including_unassigned(MeetingAssignment)
-                  .filter(lambda meeting_assignment: meeting_assignment.starting_time_grain is not None),
-                  Joiners.greater_than(lambda left_assignment: left_assignment.meeting.id,
-                                     lambda right_assignment: right_assignment.meeting.id),
-                  Joiners.overlapping(lambda assignment: assignment.get_grain_index(),
-                                    lambda assignment: assignment.get_last_time_grain_index() + 1))
-            .penalize(HardMediumSoftScore.of_soft(10),
-                     lambda left_assignment, right_assignment: left_assignment.calculate_overlap(right_assignment))
-            .as_constraint("Overlapping meetings"))
+    return (
+        constraint_factory.for_each_including_unassigned(MeetingAssignment)
+        .filter(
+            lambda meeting_assignment: meeting_assignment.starting_time_grain
+            is not None
+        )
+        .join(
+            constraint_factory.for_each_including_unassigned(MeetingAssignment).filter(
+                lambda meeting_assignment: meeting_assignment.starting_time_grain
+                is not None
+            ),
+            Joiners.greater_than(
+                lambda left_assignment: left_assignment.meeting.id,
+                lambda right_assignment: right_assignment.meeting.id,
+            ),
+            Joiners.overlapping(
+                lambda assignment: assignment.get_grain_index(),
+                lambda assignment: assignment.get_last_time_grain_index() + 1,
+            ),
+        )
+        .penalize(
+            HardMediumSoftScore.of_soft(10),
+            lambda left_assignment, right_assignment: left_assignment.calculate_overlap(
+                right_assignment
+            ),
+        )
+        .as_constraint("Overlapping meetings")
+    )
 
 
 def assign_larger_rooms_first(constraint_factory: ConstraintFactory) -> Constraint:
@@ -297,15 +440,23 @@ def assign_larger_rooms_first(constraint_factory: ConstraintFactory) -> Constrai
     Returns:
         Constraint: The defined constraint.
     """
-    return (constraint_factory
-            .for_each_including_unassigned(MeetingAssignment)
-            .filter(lambda meeting_assignment: meeting_assignment.room is not None)
-            .join(Room,
-                  Joiners.less_than(lambda meeting_assignment: meeting_assignment.get_room_capacity(),
-                                   lambda room: room.capacity))
-            .penalize(HardMediumSoftScore.ONE_SOFT,
-                     lambda meeting_assignment, room: room.capacity - meeting_assignment.get_room_capacity())
-            .as_constraint("Assign larger rooms first"))
+    return (
+        constraint_factory.for_each_including_unassigned(MeetingAssignment)
+        .filter(lambda meeting_assignment: meeting_assignment.room is not None)
+        .join(
+            Room,
+            Joiners.less_than(
+                lambda meeting_assignment: meeting_assignment.get_room_capacity(),
+                lambda room: room.capacity,
+            ),
+        )
+        .penalize(
+            HardMediumSoftScore.ONE_SOFT,
+            lambda meeting_assignment, room: room.capacity
+            - meeting_assignment.get_room_capacity(),
+        )
+        .as_constraint("Assign larger rooms first")
+    )
 
 
 def room_stability(constraint_factory: ConstraintFactory) -> Constraint:
@@ -320,32 +471,66 @@ def room_stability(constraint_factory: ConstraintFactory) -> Constraint:
     Returns:
         Constraint: The defined constraint.
     """
+
     def create_attendance_stability_stream(attendance_type):
-        return (constraint_factory
-                .for_each(attendance_type)
-                .join(attendance_type,
-                      Joiners.equal(lambda left_attendance: left_attendance.person,
-                                   lambda right_attendance: right_attendance.person),
-                      Joiners.filtering(lambda left_attendance, right_attendance:
-                                       left_attendance.meeting_id != right_attendance.meeting_id))
-                .join(MeetingAssignment,
-                      Joiners.equal(lambda left_attendance, right_attendance: left_attendance.meeting_id,
-                                   lambda assignment: assignment.meeting.id))
-                .join(MeetingAssignment,
-                      Joiners.equal(lambda left_attendance, right_attendance, left_assignment: right_attendance.meeting_id,
-                                   lambda assignment: assignment.meeting.id),
-                      Joiners.less_than(lambda left_attendance, right_attendance, left_assignment: left_assignment.get_grain_index(),
-                                       lambda assignment: assignment.get_grain_index()),
-                      Joiners.filtering(lambda left_attendance, right_attendance, left_assignment, right_assignment:
-                                       left_assignment.room != right_assignment.room),
-                      Joiners.filtering(lambda left_attendance, right_attendance, left_assignment, right_assignment:
-                                       right_assignment.get_grain_index() -
-                                       left_assignment.meeting.duration_in_grains -
-                                       left_assignment.get_grain_index() <= 2))
-                .penalize(HardMediumSoftScore.ONE_SOFT))
+        return (
+            constraint_factory.for_each(attendance_type)
+            .join(
+                attendance_type,
+                Joiners.equal(
+                    lambda left_attendance: left_attendance.person,
+                    lambda right_attendance: right_attendance.person,
+                ),
+                Joiners.filtering(
+                    lambda left_attendance, right_attendance: left_attendance.meeting_id
+                    != right_attendance.meeting_id
+                ),
+            )
+            .join(
+                MeetingAssignment,
+                Joiners.equal(
+                    lambda left_attendance,
+                    right_attendance: left_attendance.meeting_id,
+                    lambda assignment: assignment.meeting.id,
+                ),
+            )
+            .join(
+                MeetingAssignment,
+                Joiners.equal(
+                    lambda left_attendance,
+                    right_attendance,
+                    left_assignment: right_attendance.meeting_id,
+                    lambda assignment: assignment.meeting.id,
+                ),
+                Joiners.less_than(
+                    lambda left_attendance,
+                    right_attendance,
+                    left_assignment: left_assignment.get_grain_index(),
+                    lambda assignment: assignment.get_grain_index(),
+                ),
+                Joiners.filtering(
+                    lambda left_attendance,
+                    right_attendance,
+                    left_assignment,
+                    right_assignment: left_assignment.room != right_assignment.room
+                ),
+                Joiners.filtering(
+                    lambda left_attendance,
+                    right_attendance,
+                    left_assignment,
+                    right_assignment: right_assignment.get_grain_index()
+                    - left_assignment.meeting.duration_in_grains
+                    - left_assignment.get_grain_index()
+                    <= 2
+                ),
+            )
+            .penalize(HardMediumSoftScore.ONE_SOFT)
+        )
 
     # Combine both required and preferred attendance stability
     # Note: Since Python Timefold doesn't have constraint combining like Java,
     # we'll use the required attendance version as the primary one
     # TODO: In a full implementation, both streams would need to be properly combined
-    return create_attendance_stability_stream(RequiredAttendance).as_constraint("Room stability")
+    return create_attendance_stability_stream(RequiredAttendance).as_constraint(
+        "Room stability"
+    )

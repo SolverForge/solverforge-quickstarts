@@ -7,7 +7,7 @@ name = "flight_crew_scheduling"
 version = "1.0.0"
 requires-python = ">=3.11"
 dependencies = [
-    'blackops-legacy == 1.24.0b1',
+    'solverforge-legacy == 1.24.1',
     'fastapi == 0.111.0',
     'pydantic == 2.7.3',
     'uvicorn == 0.30.1',

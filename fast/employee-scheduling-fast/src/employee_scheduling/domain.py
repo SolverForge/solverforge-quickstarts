@@ -1,10 +1,15 @@
-from blackops_legacy.solver import SolverStatus
-from blackops_legacy.solver.domain import (
-    planning_entity, planning_solution, PlanningId, PlanningVariable,
-    PlanningEntityCollectionProperty, ProblemFactCollectionProperty, ValueRangeProvider,
-    PlanningScore
+from solverforge_legacy.solver import SolverStatus
+from solverforge_legacy.solver.domain import (
+    planning_entity,
+    planning_solution,
+    PlanningId,
+    PlanningVariable,
+    PlanningEntityCollectionProperty,
+    ProblemFactCollectionProperty,
+    ValueRangeProvider,
+    PlanningScore,
 )
-from blackops_legacy.solver.score import HardSoftDecimalScore
+from solverforge_legacy.solver.score import HardSoftDecimalScore
 from datetime import datetime, date
 from typing import Annotated, List, Optional, Union
 from dataclasses import dataclass, field
@@ -35,7 +40,9 @@ class Shift:
 @planning_solution
 @dataclass
 class EmployeeSchedule:
-    employees: Annotated[list[Employee], ProblemFactCollectionProperty, ValueRangeProvider]
+    employees: Annotated[
+        list[Employee], ProblemFactCollectionProperty, ValueRangeProvider
+    ]
     shifts: Annotated[list[Shift], PlanningEntityCollectionProperty]
     score: Annotated[HardSoftDecimalScore | None, PlanningScore] = None
     solver_status: SolverStatus = SolverStatus.NOT_SOLVING
@@ -53,7 +60,7 @@ class EmployeeModel(JsonDomainBase):
 class ShiftModel(JsonDomainBase):
     id: str
     start: str  # ISO datetime string
-    end: str    # ISO datetime string
+    end: str  # ISO datetime string
     location: str
     required_skill: str = Field(..., alias="requiredSkill")
     employee: Union[str, EmployeeModel, None] = None

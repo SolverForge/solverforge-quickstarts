@@ -1,10 +1,6 @@
-<p align="center">
-  <a href="https://timefold.ai">
-    <img src="/timefold-logo.png" width="400px"  alt="Timefold Solver" />
-  </a>
-</p>
+# SolverForge Quickstarts
 
-This repository contains unofficial Python quickstarts for [Timefold Solver](https://github.com/TimefoldAI/timefold-solver-python), an AI constraint solver. The Python solver has been [discontinued by Timefold](https://github.com/TimefoldAI/timefold-solver/discussions/1698#discussioncomment-13842196) and the original team is focusing on the Java and Kotlin solvers.
+This repository contains Python quickstarts for [SolverForge](https://github.com/SolverForge/solverforge-legacy), a 100% Timefold-compatible AI constraint solver. The original Timefold solver for Python has been [discontinued by Timefold](https://github.com/TimefoldAI/timefold-solver/discussions/1698#discussioncomment-13842196) and the original team is focusing on the Java and Kotlin solvers.
 A roadmap to provide community support for Python is currently under review.
 
 Priority for this repository is closing the performance gap between the Java and Python quickstarts by providing optimized solutions for all use cases.
@@ -23,7 +19,7 @@ Currently, *fast* quickstarts are available for the [employee-scheduling](fast/e
 
 Being unofficial, this repository is not directly affiliated with Timefold AI, but maintainers are in touch with the Timefold AI team.
 
-It shows different use cases and basic implementations of constraint solving in Python. 
+It shows different use cases and basic implementations of constraint solving in Python.
 
 ## Overview
 

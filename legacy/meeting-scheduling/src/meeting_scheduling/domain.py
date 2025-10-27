@@ -1,17 +1,31 @@
 from typing import List, Optional, Annotated, Any
-from blackops_legacy.solver.domain import (
-    planning_entity, planning_solution, PlanningId, PlanningVariable,
-    PlanningEntityCollectionProperty, ProblemFactCollectionProperty, ValueRangeProvider,
-    PlanningScore, PlanningPin
+from solverforge_legacy.solver.domain import (
+    planning_entity,
+    planning_solution,
+    PlanningId,
+    PlanningVariable,
+    PlanningEntityCollectionProperty,
+    ProblemFactCollectionProperty,
+    ValueRangeProvider,
+    PlanningScore,
+    PlanningPin,
 )
-from blackops_legacy.solver import SolverStatus
-from blackops_legacy.solver.score import HardMediumSoftScore
-from pydantic import BaseModel, Field, ConfigDict, PlainSerializer, BeforeValidator, ValidationInfo
+from solverforge_legacy.solver import SolverStatus
+from solverforge_legacy.solver.score import HardMediumSoftScore
+from pydantic import (
+    BaseModel,
+    Field,
+    ConfigDict,
+    PlainSerializer,
+    BeforeValidator,
+    ValidationInfo,
+)
 from pydantic.alias_generators import to_camel
 
 
 # Time granularity is 15 minutes (which is often recommended when dealing with humans for practical purposes).
 GRAIN_LENGTH_IN_MINUTES = 15
+
 
 # Serializers and validators for Pydantic
 def make_people_validator():
@@ -20,12 +34,14 @@ def make_people_validator():
             return None
         if not isinstance(v, str) or not info.context:
             return v
-        people_lookup = info.context.get('people', {})
+        people_lookup = info.context.get("people", {})
         if v in people_lookup:
             return people_lookup[v]
         # If not found, return the original value (should be a Person object already)
         return v
+
     return BeforeValidator(validator)
+
 
 def make_meeting_validator():
     def validator(v: Any, info: ValidationInfo) -> Any:
@@ -33,8 +49,10 @@ def make_meeting_validator():
             return None
         if not isinstance(v, str) or not info.context:
             return v
-        return info.context.get('meetings', {}).get(v, v)
+        return info.context.get("meetings", {}).get(v, v)
+
     return BeforeValidator(validator)
+
 
 def make_room_validator():
     def validator(v: Any, info: ValidationInfo) -> Any:
@@ -42,8 +60,10 @@ def make_room_validator():
             return None
         if not isinstance(v, str) or not info.context:
             return v
-        return info.context.get('rooms', {}).get(v, v)
+        return info.context.get("rooms", {}).get(v, v)
+
     return BeforeValidator(validator)
+
 
 def make_time_grain_validator():
     def validator(v: Any, info: ValidationInfo) -> Any:
@@ -51,11 +71,18 @@ def make_time_grain_validator():
             return None
         if not isinstance(v, str) or not info.context:
             return v
-        return info.context.get('timeGrains', {}).get(v, v)
+        return info.context.get("timeGrains", {}).get(v, v)
+
     return BeforeValidator(validator)
 
-IdSerializer = PlainSerializer(lambda item: item.id if item is not None else None, return_type=str | None)
-ScoreSerializer = PlainSerializer(lambda score: str(score) if score is not None else None, return_type=str | None)
+
+IdSerializer = PlainSerializer(
+    lambda item: item.id if item is not None else None, return_type=str | None
+)
+ScoreSerializer = PlainSerializer(
+    lambda score: str(score) if score is not None else None, return_type=str | None
+)
+
 
 def validate_score(v: Any, info: ValidationInfo) -> Any:
     if isinstance(v, HardMediumSoftScore) or v is None:
@@ -63,6 +90,7 @@ def validate_score(v: Any, info: ValidationInfo) -> Any:
     if isinstance(v, str):
         return HardMediumSoftScore.parse(v)
     raise ValueError('"score" should be a string')
+
 
 ScoreValidator = BeforeValidator(validate_score)
 
@@ -72,12 +100,14 @@ MeetingDeserializer = make_meeting_validator()
 RoomDeserializer = make_room_validator()
 TimeGrainDeserializer = make_time_grain_validator()
 
+
 class JsonDomainBase(BaseModel):
     model_config = ConfigDict(
         alias_generator=to_camel,
         populate_by_name=True,
         from_attributes=True,
     )
+
 
 class Person(JsonDomainBase):
     id: Annotated[str, PlanningId]
@@ -90,6 +120,7 @@ class Person(JsonDomainBase):
         if not isinstance(other, Person):
             return False
         return self.id == other.id
+
 
 class TimeGrain(JsonDomainBase):
     id: Annotated[str, PlanningId]
@@ -104,6 +135,7 @@ class TimeGrain(JsonDomainBase):
         if not isinstance(other, TimeGrain):
             return False
         return self.id == other.id
+
 
 class Room(JsonDomainBase):
     id: Annotated[str, PlanningId]
@@ -121,12 +153,15 @@ class Room(JsonDomainBase):
 
 class Attendance(JsonDomainBase):
     """Abstract base class for attendance"""
+
     id: Annotated[str, PlanningId]
     person: Annotated[Person, IdSerializer, PeopleDeserializer]
     meeting_id: str = Field(..., alias="meeting")
 
+
 class RequiredAttendance(Attendance):
     pass
+
 
 class PreferredAttendance(Attendance):
     pass
@@ -147,19 +182,29 @@ class Meeting(JsonDomainBase):
 
     def add_required_attendant(self, person: Person) -> None:
         if any(r.person.id == person.id for r in self.required_attendances):
-            raise ValueError(f"The person {person.id} is already assigned to the meeting {self.id}.")
+            raise ValueError(
+                f"The person {person.id} is already assigned to the meeting {self.id}."
+            )
         self.required_attendances.append(
-            RequiredAttendance(id=f"{self.id}-{self.get_required_capacity() + 1}",
-                              meeting_id=self.id,
-                              person=person))
+            RequiredAttendance(
+                id=f"{self.id}-{self.get_required_capacity() + 1}",
+                meeting_id=self.id,
+                person=person,
+            )
+        )
 
     def add_preferred_attendant(self, person: Person) -> None:
         if any(p.person.id == person.id for p in self.preferred_attendances):
-            raise ValueError(f"The person {person.id} is already assigned to the meeting {self.id}.")
+            raise ValueError(
+                f"The person {person.id} is already assigned to the meeting {self.id}."
+            )
         self.preferred_attendances.append(
-            PreferredAttendance(id=f"{self.id}-{self.get_required_capacity() + 1}",
-                               meeting_id=self.id,
-                               person=person))
+            PreferredAttendance(
+                id=f"{self.id}-{self.get_required_capacity() + 1}",
+                meeting_id=self.id,
+                person=person,
+            )
+        )
 
 
 @planning_entity
@@ -167,8 +212,12 @@ class MeetingAssignment(JsonDomainBase):
     id: Annotated[str, PlanningId]
     meeting: Annotated[Meeting, IdSerializer, MeetingDeserializer]
     pinned: Annotated[bool, PlanningPin] = False
-    starting_time_grain: Annotated[Optional[TimeGrain], PlanningVariable, IdSerializer, TimeGrainDeserializer] = None
-    room: Annotated[Optional[Room], PlanningVariable, IdSerializer, RoomDeserializer] = None
+    starting_time_grain: Annotated[
+        Optional[TimeGrain], PlanningVariable, IdSerializer, TimeGrainDeserializer
+    ] = None
+    room: Annotated[
+        Optional[Room], PlanningVariable, IdSerializer, RoomDeserializer
+    ] = None
 
     def get_grain_index(self) -> Optional[int]:
         if self.starting_time_grain is None:
@@ -193,7 +242,9 @@ class MeetingAssignment(JsonDomainBase):
     def get_last_time_grain_index(self) -> Optional[int]:
         if self.starting_time_grain is None:
             return None
-        return self.starting_time_grain.grain_index + self.meeting.duration_in_grains - 1
+        return (
+            self.starting_time_grain.grain_index + self.meeting.duration_in_grains - 1
+        )
 
     def get_room_capacity(self) -> int:
         if self.room is None:
@@ -207,11 +258,21 @@ class MeetingAssignment(JsonDomainBase):
 @planning_solution
 class MeetingSchedule(JsonDomainBase):
     people: Annotated[List[Person], ProblemFactCollectionProperty]
-    time_grains: Annotated[List[TimeGrain], ProblemFactCollectionProperty, ValueRangeProvider]
+    time_grains: Annotated[
+        List[TimeGrain], ProblemFactCollectionProperty, ValueRangeProvider
+    ]
     rooms: Annotated[List[Room], ProblemFactCollectionProperty, ValueRangeProvider]
     meetings: Annotated[List[Meeting], ProblemFactCollectionProperty]
-    required_attendances: Annotated[List[RequiredAttendance], ProblemFactCollectionProperty] = Field(default_factory=list)
-    preferred_attendances: Annotated[List[PreferredAttendance], ProblemFactCollectionProperty] = Field(default_factory=list)
-    meeting_assignments: Annotated[List[MeetingAssignment], PlanningEntityCollectionProperty] = Field(default_factory=list)
-    score: Annotated[Optional[HardMediumSoftScore], PlanningScore, ScoreSerializer, ScoreValidator] = None
+    required_attendances: Annotated[
+        List[RequiredAttendance], ProblemFactCollectionProperty
+    ] = Field(default_factory=list)
+    preferred_attendances: Annotated[
+        List[PreferredAttendance], ProblemFactCollectionProperty
+    ] = Field(default_factory=list)
+    meeting_assignments: Annotated[
+        List[MeetingAssignment], PlanningEntityCollectionProperty
+    ] = Field(default_factory=list)
+    score: Annotated[
+        Optional[HardMediumSoftScore], PlanningScore, ScoreSerializer, ScoreValidator
+    ] = None
     solver_status: SolverStatus = SolverStatus.NOT_SOLVING

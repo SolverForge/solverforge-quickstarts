@@ -1,6 +1,11 @@
-from blackops_legacy.solver import SolverFactory
-from blackops_legacy.solver.config import (SolverConfig, ScoreDirectorFactoryConfig, TerminationConfig, Duration,
-                                    TerminationCompositionStyle)
+from solverforge_legacy.solver import SolverFactory
+from solverforge_legacy.solver.config import (
+    SolverConfig,
+    ScoreDirectorFactoryConfig,
+    TerminationConfig,
+    Duration,
+    TerminationCompositionStyle,
+)
 
 from employee_scheduling.rest_api import app
 from employee_scheduling.domain import *
@@ -32,4 +37,4 @@ def test_feasible():
             return
 
     client.delete(f"/schedules/{job_id}")
-    fail('solution is not feasible')
+    fail("solution is not feasible")

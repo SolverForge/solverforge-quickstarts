@@ -5,17 +5,15 @@ from uuid import uuid4
 from fastapi.encoders import jsonable_encoder
 import json
 
-from blackops_legacy.solver import SolverManager, SolutionManager
+from solverforge_legacy.solver import SolverManager, SolutionManager
 
 from .domain import MeetingSchedule
-from .converters import (
-    MeetingScheduleModel, schedule_to_model, model_to_schedule
-)
+from .converters import MeetingScheduleModel, schedule_to_model, model_to_schedule
 from .demo_data import generate_demo_data
 from .solver import solver_manager, solution_manager
 from .score_analysis import ConstraintAnalysisDTO, MatchAnalysisDTO
 
-app = FastAPI(docs_url='/q/swagger-ui')
+app = FastAPI(docs_url="/q/swagger-ui")
 
 # Dictionary to store submitted data sets (using domain models internally)
 data_sets: Dict[str, MeetingSchedule] = {}
@@ -60,9 +58,9 @@ async def get_status(problem_id: str) -> Dict:
         "score": {
             "hardScore": schedule.score.hard_score if schedule.score else 0,
             "mediumScore": schedule.score.medium_score if schedule.score else 0,
-            "softScore": schedule.score.soft_score if schedule.score else 0
+            "softScore": schedule.score.soft_score if schedule.score else 0,
         },
-        "solverStatus": solver_status.name
+        "solverStatus": solver_status.name,
     }
 
 
@@ -99,9 +97,7 @@ async def solve_schedule(request: Request) -> str:
 
     data_sets[job_id] = domain_schedule
     solver_manager.solve_and_listen(
-        job_id,
-        domain_schedule,
-        lambda solution: update_schedule(job_id, solution)
+        job_id, domain_schedule, lambda solution: update_schedule(job_id, solution)
     )
     return job_id
 
@@ -126,7 +122,7 @@ async def analyze_schedule(request: Request) -> Dict:
             MatchAnalysisDTO(
                 name=match.constraint_ref.constraint_name,
                 score=match.score,
-                justification=match.justification
+                justification=match.justification,
             )
             for match in constraint.matches
         ]
@@ -135,13 +131,11 @@ async def analyze_schedule(request: Request) -> Dict:
             name=constraint.constraint_name,
             weight=constraint.weight,
             score=constraint.score,
-            matches=matches
+            matches=matches,
         )
         constraints.append(constraint_dto)
 
-    return {
-        "constraints": [constraint.model_dump() for constraint in constraints]
-    }
+    return {"constraints": [constraint.model_dump() for constraint in constraints]}
 
 
 # Mount static files

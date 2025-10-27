@@ -1,8 +1,14 @@
-from blackops_legacy.solver.domain import (planning_entity, planning_solution, PlanningId, PlanningVariable,
-                                    PlanningEntityCollectionProperty,
-                                    ProblemFactCollectionProperty, ValueRangeProvider,
-                                    PlanningScore)
-from blackops_legacy.solver.score import HardSoftScore
+from solverforge_legacy.solver.domain import (
+    planning_entity,
+    planning_solution,
+    PlanningId,
+    PlanningVariable,
+    PlanningEntityCollectionProperty,
+    ProblemFactCollectionProperty,
+    ValueRangeProvider,
+    PlanningScore,
+)
+from solverforge_legacy.solver.score import HardSoftScore
 from dataclasses import dataclass, field
 from datetime import time
 from typing import Annotated
@@ -15,7 +21,7 @@ class Timeslot:
     end_time: time
 
     def __str__(self):
-        return f'{self.day_of_week} {self.start_time.strftime("%H:%M")}'
+        return f"{self.day_of_week} {self.start_time.strftime('%H:%M')}"
 
 
 @dataclass
@@ -23,7 +29,7 @@ class Room:
     name: str
 
     def __str__(self):
-        return f'{self.name}'
+        return f"{self.name}"
 
 
 @planning_entity
@@ -41,12 +47,9 @@ class Lesson:
 @dataclass
 class Timetable:
     id: str
-    timeslots: Annotated[list[Timeslot],
-                         ProblemFactCollectionProperty,
-                         ValueRangeProvider]
-    rooms: Annotated[list[Room],
-                     ProblemFactCollectionProperty,
-                     ValueRangeProvider]
-    lessons: Annotated[list[Lesson],
-                       PlanningEntityCollectionProperty]
+    timeslots: Annotated[
+        list[Timeslot], ProblemFactCollectionProperty, ValueRangeProvider
+    ]
+    rooms: Annotated[list[Room], ProblemFactCollectionProperty, ValueRangeProvider]
+    lessons: Annotated[list[Lesson], PlanningEntityCollectionProperty]
     score: Annotated[HardSoftScore, PlanningScore] = field(default=None)

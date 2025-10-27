@@ -1,22 +1,30 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, Annotated, Union
-from blackops_legacy.solver.domain import (
-    planning_entity, planning_solution, PlanningId, PlanningVariable,
-    PlanningEntityCollectionProperty, ProblemFactCollectionProperty, ValueRangeProvider,
-    PlanningScore, PlanningPin
+from solverforge_legacy.solver.domain import (
+    planning_entity,
+    planning_solution,
+    PlanningId,
+    PlanningVariable,
+    PlanningEntityCollectionProperty,
+    ProblemFactCollectionProperty,
+    ValueRangeProvider,
+    PlanningScore,
+    PlanningPin,
 )
-from blackops_legacy.solver import SolverStatus
-from blackops_legacy.solver.score import HardMediumSoftScore
+from solverforge_legacy.solver import SolverStatus
+from solverforge_legacy.solver.score import HardMediumSoftScore
 from .json_serialization import JsonDomainBase
 from pydantic import Field
 
 # Time granularity is 15 minutes (which is often recommended when dealing with humans for practical purposes).
 GRAIN_LENGTH_IN_MINUTES = 15
 
+
 @dataclass
 class Person:
     id: Annotated[str, PlanningId]
     full_name: str
+
 
 @dataclass
 class TimeGrain:
@@ -25,11 +33,13 @@ class TimeGrain:
     day_of_year: int
     starting_minute_of_day: int
 
+
 @dataclass
 class Room:
     id: Annotated[str, PlanningId]
     name: str
     capacity: int
+
 
 # Define RequiredAttendance and PreferredAttendance before Meeting to avoid forward references
 @dataclass
@@ -38,11 +48,13 @@ class RequiredAttendance:
     person: Person
     meeting_id: str
 
+
 @dataclass
 class PreferredAttendance:
     id: Annotated[str, PlanningId]
     person: Person
     meeting_id: str
+
 
 @dataclass
 class Meeting:
@@ -60,19 +72,30 @@ class Meeting:
 
     def add_required_attendant(self, person: Person) -> None:
         if any(r.person.id == person.id for r in self.required_attendances):
-            raise ValueError(f"The person {person.id} is already assigned to the meeting {self.id}.")
+            raise ValueError(
+                f"The person {person.id} is already assigned to the meeting {self.id}."
+            )
         self.required_attendances.append(
-            RequiredAttendance(id=f"{self.id}-{self.get_required_capacity() + 1}",
-                              meeting_id=self.id,
-                              person=person))
+            RequiredAttendance(
+                id=f"{self.id}-{self.get_required_capacity() + 1}",
+                meeting_id=self.id,
+                person=person,
+            )
+        )
 
     def add_preferred_attendant(self, person: Person) -> None:
         if any(p.person.id == person.id for p in self.preferred_attendances):
-            raise ValueError(f"The person {person.id} is already assigned to the meeting {self.id}.")
+            raise ValueError(
+                f"The person {person.id} is already assigned to the meeting {self.id}."
+            )
         self.preferred_attendances.append(
-            PreferredAttendance(id=f"{self.id}-{self.get_required_capacity() + 1}",
-                               meeting_id=self.id,
-                               person=person))
+            PreferredAttendance(
+                id=f"{self.id}-{self.get_required_capacity() + 1}",
+                meeting_id=self.id,
+                person=person,
+            )
+        )
+
 
 @planning_entity
 @dataclass
@@ -105,7 +128,9 @@ class MeetingAssignment:
     def get_last_time_grain_index(self) -> Optional[int]:
         if self.starting_time_grain is None:
             return None
-        return self.starting_time_grain.grain_index + self.meeting.duration_in_grains - 1
+        return (
+            self.starting_time_grain.grain_index + self.meeting.duration_in_grains - 1
+        )
 
     def get_room_capacity(self) -> int:
         if self.room is None:
@@ -115,23 +140,34 @@ class MeetingAssignment:
     def get_required_capacity(self) -> int:
         return self.meeting.get_required_capacity()
 
+
 @planning_solution
 @dataclass
 class MeetingSchedule:
     people: Annotated[List[Person], ProblemFactCollectionProperty]
-    time_grains: Annotated[List[TimeGrain], ProblemFactCollectionProperty, ValueRangeProvider]
+    time_grains: Annotated[
+        List[TimeGrain], ProblemFactCollectionProperty, ValueRangeProvider
+    ]
     rooms: Annotated[List[Room], ProblemFactCollectionProperty, ValueRangeProvider]
     meetings: Annotated[List[Meeting], ProblemFactCollectionProperty]
-    required_attendances: Annotated[List[RequiredAttendance], ProblemFactCollectionProperty] = field(default_factory=list)
-    preferred_attendances: Annotated[List[PreferredAttendance], ProblemFactCollectionProperty] = field(default_factory=list)
-    meeting_assignments: Annotated[List[MeetingAssignment], PlanningEntityCollectionProperty] = field(default_factory=list)
+    required_attendances: Annotated[
+        List[RequiredAttendance], ProblemFactCollectionProperty
+    ] = field(default_factory=list)
+    preferred_attendances: Annotated[
+        List[PreferredAttendance], ProblemFactCollectionProperty
+    ] = field(default_factory=list)
+    meeting_assignments: Annotated[
+        List[MeetingAssignment], PlanningEntityCollectionProperty
+    ] = field(default_factory=list)
     score: Annotated[Optional[HardMediumSoftScore], PlanningScore] = None
     solver_status: SolverStatus = SolverStatus.NOT_SOLVING
+
 
 # Pydantic REST models for API (used for deserialization and context)
 class PersonModel(JsonDomainBase):
     id: str
     full_name: str
+
 
 class TimeGrainModel(JsonDomainBase):
     id: str
@@ -139,20 +175,24 @@ class TimeGrainModel(JsonDomainBase):
     day_of_year: int
     starting_minute_of_day: int
 
+
 class RoomModel(JsonDomainBase):
     id: str
     name: str
     capacity: int
+
 
 class RequiredAttendanceModel(JsonDomainBase):
     id: str
     person: PersonModel
     meeting_id: str = Field(..., alias="meeting")
 
+
 class PreferredAttendanceModel(JsonDomainBase):
     id: str
     person: PersonModel
     meeting_id: str = Field(..., alias="meeting")
+
 
 class MeetingModel(JsonDomainBase):
     id: str
@@ -161,8 +201,13 @@ class MeetingModel(JsonDomainBase):
     speakers: Optional[List[PersonModel]] = None
     content: Optional[str] = None
     entire_group_meeting: bool = False
-    required_attendances: List[RequiredAttendanceModel] = Field(default_factory=list, alias="requiredAttendances")
-    preferred_attendances: List[PreferredAttendanceModel] = Field(default_factory=list, alias="preferredAttendances")
+    required_attendances: List[RequiredAttendanceModel] = Field(
+        default_factory=list, alias="requiredAttendances"
+    )
+    preferred_attendances: List[PreferredAttendanceModel] = Field(
+        default_factory=list, alias="preferredAttendances"
+    )
+
 
 class MeetingAssignmentModel(JsonDomainBase):
     id: str
@@ -171,13 +216,18 @@ class MeetingAssignmentModel(JsonDomainBase):
     starting_time_grain: Union[str, TimeGrainModel, None] = None
     room: Union[str, RoomModel, None] = None
 
+
 class MeetingScheduleModel(JsonDomainBase):
     people: List[PersonModel]
     time_grains: List[TimeGrainModel]
     rooms: List[RoomModel]
     meetings: List[MeetingModel]
-    required_attendances: List[RequiredAttendanceModel] = Field(default_factory=list, alias="requiredAttendances")
-    preferred_attendances: List[PreferredAttendanceModel] = Field(default_factory=list, alias="preferredAttendances")
+    required_attendances: List[RequiredAttendanceModel] = Field(
+        default_factory=list, alias="requiredAttendances"
+    )
+    preferred_attendances: List[PreferredAttendanceModel] = Field(
+        default_factory=list, alias="preferredAttendances"
+    )
     meeting_assignments: List[MeetingAssignmentModel] = Field(default_factory=list)
     score: Optional[str] = None
     solver_status: Optional[str] = None
