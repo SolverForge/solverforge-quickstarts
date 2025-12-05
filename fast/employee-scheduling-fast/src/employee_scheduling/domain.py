@@ -36,6 +36,28 @@ class Shift:
     required_skill: str
     employee: Annotated[Employee | None, PlanningVariable] = None
 
+    def has_required_skill(self) -> bool:
+        """Check if assigned employee has the required skill."""
+        if self.employee is None:
+            return False
+        return self.required_skill in self.employee.skills
+
+    def is_overlapping_with_date(self, dt: date) -> bool:
+        """Check if shift overlaps with a specific date."""
+        return self.start.date() == dt or self.end.date() == dt
+
+    def get_overlapping_duration_in_minutes(self, dt: date) -> int:
+        """Calculate overlap duration in minutes for a specific date."""
+        start_date_time = datetime.combine(dt, datetime.min.time())
+        end_date_time = datetime.combine(dt, datetime.max.time())
+
+        # Calculate overlap between date range and shift range
+        max_start_time = max(start_date_time, self.start)
+        min_end_time = min(end_date_time, self.end)
+
+        minutes = (min_end_time - max_start_time).total_seconds() / 60
+        return int(max(0, minutes))
+
 
 @planning_solution
 @dataclass
