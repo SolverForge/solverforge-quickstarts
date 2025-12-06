@@ -610,6 +610,64 @@ def test_desired_day_for_employee():
     )
 
 
+def test_max_shifts_per_employee():
+    employee = Employee(name="Amy")
+
+    # 12 shifts: no violation (at the limit)
+    shifts_12 = [
+        Shift(
+            id=str(i),
+            start=DAY_START_TIME + timedelta(days=i),
+            end=DAY_END_TIME + timedelta(days=i),
+            location="Location",
+            required_skill="Skill",
+            employee=employee,
+        )
+        for i in range(12)
+    ]
+    (
+        constraint_verifier.verify_that(max_shifts_per_employee)
+        .given(employee, *shifts_12)
+        .penalizes(0)
+    )
+
+    # 13 shifts: penalty of 1 (13 - 12 = 1)
+    shifts_13 = [
+        Shift(
+            id=str(i),
+            start=DAY_START_TIME + timedelta(days=i),
+            end=DAY_END_TIME + timedelta(days=i),
+            location="Location",
+            required_skill="Skill",
+            employee=employee,
+        )
+        for i in range(13)
+    ]
+    (
+        constraint_verifier.verify_that(max_shifts_per_employee)
+        .given(employee, *shifts_13)
+        .penalizes_by(1)
+    )
+
+    # 15 shifts: penalty of 3 (15 - 12 = 3)
+    shifts_15 = [
+        Shift(
+            id=str(i),
+            start=DAY_START_TIME + timedelta(days=i),
+            end=DAY_END_TIME + timedelta(days=i),
+            location="Location",
+            required_skill="Skill",
+            employee=employee,
+        )
+        for i in range(15)
+    ]
+    (
+        constraint_verifier.verify_that(max_shifts_per_employee)
+        .given(employee, *shifts_15)
+        .penalizes_by(3)
+    )
+
+
 def test_balance_employee_shift_assignments():
     employee1 = Employee(name="Amy", desired_dates={DAY_1, DAY_3})
     employee2 = Employee(name="Beth")

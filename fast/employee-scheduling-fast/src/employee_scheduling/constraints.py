@@ -51,6 +51,7 @@ def define_constraints(constraint_factory: ConstraintFactory):
         at_least_10_hours_between_two_shifts(constraint_factory),
         one_shift_per_day(constraint_factory),
         unavailable_employee(constraint_factory),
+        max_shifts_per_employee(constraint_factory),
         # Soft constraints
         undesired_day_for_employee(constraint_factory),
         desired_day_for_employee(constraint_factory),
@@ -131,6 +132,29 @@ def unavailable_employee(constraint_factory: ConstraintFactory):
             lambda shift, unavailable_date: shift.get_overlapping_duration_in_minutes(unavailable_date),
         )
         .as_constraint("Unavailable employee")
+    )
+
+
+def max_shifts_per_employee(constraint_factory: ConstraintFactory):
+    """
+    Hard constraint: No employee can have more than 12 shifts.
+
+    The limit of 12 is chosen based on the demo data dimensions:
+    - SMALL dataset: 139 shifts / 15 employees = ~9.3 average
+    - This provides headroom while preventing extreme imbalance
+
+    Note: A limit that's too low (e.g., 5) would make the problem infeasible.
+    Always ensure your constraints are compatible with your data dimensions.
+    """
+    return (
+        constraint_factory.for_each(Shift)
+        .group_by(lambda shift: shift.employee, ConstraintCollectors.count())
+        .filter(lambda employee, shift_count: shift_count > 12)
+        .penalize(
+            HardSoftDecimalScore.ONE_HARD,
+            lambda employee, shift_count: shift_count - 12,
+        )
+        .as_constraint("Max 12 shifts per employee")
     )
 
 
