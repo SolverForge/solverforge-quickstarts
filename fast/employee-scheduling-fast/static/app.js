@@ -39,17 +39,24 @@ let windowStart = JSJoda.LocalDate.now().toString();
 let windowEnd = JSJoda.LocalDate.parse(windowStart).plusDays(7).toString();
 
 $(document).ready(function () {
+    let initialized = false;
+
+    function safeInitialize() {
+        if (!initialized) {
+            initialized = true;
+            initializeApp();
+        }
+    }
+
     // Ensure all resources are loaded before initializing
-    $(window).on('load', function() {
-        initializeApp();
-    });
-    
+    $(window).on('load', safeInitialize);
+
     // Fallback if window load event doesn't fire
-    setTimeout(initializeApp, 100);
+    setTimeout(safeInitialize, 100);
 });
 
 function initializeApp() {
-    replaceQuickstartTimefoldAutoHeaderFooter();
+    replaceQuickstartSolverForgeAutoHeaderFooter();
 
     $("#solveButton").click(function () {
         solve();
@@ -446,23 +453,6 @@ function refreshSolvingButtons(solving) {
     }
 }
 
-function refreshSolvingButtons(solving) {
-    if (solving) {
-        $("#solveButton").hide();
-        $("#stopSolvingButton").show();
-        if (autoRefreshIntervalId == null) {
-            autoRefreshIntervalId = setInterval(refreshSchedule, 2000);
-        }
-    } else {
-        $("#solveButton").show();
-        $("#stopSolvingButton").hide();
-        if (autoRefreshIntervalId != null) {
-            clearInterval(autoRefreshIntervalId);
-            autoRefreshIntervalId = null;
-        }
-    }
-}
-
 function stopSolving() {
     $.delete(`/schedules/${scheduleId}`, function () {
         refreshSolvingButtons(false);
@@ -472,15 +462,15 @@ function stopSolving() {
     });
 }
 
-function replaceQuickstartTimefoldAutoHeaderFooter() {
-    const timefoldHeader = $("header#timefold-auto-header");
-    if (timefoldHeader != null) {
-        timefoldHeader.addClass("bg-black")
-        timefoldHeader.append(
+function replaceQuickstartSolverForgeAutoHeaderFooter() {
+    const solverforgeHeader = $("header#solverforge-auto-header");
+    if (solverforgeHeader != null) {
+        solverforgeHeader.css("background-color", "#ffffff");
+        solverforgeHeader.append(
             $(`<div class="container-fluid">
-        <nav class="navbar sticky-top navbar-expand-lg navbar-dark shadow mb-3">
-          <a class="navbar-brand" href="https://timefold.ai">
-            <img src="/webjars/timefold/img/timefold-logo-horizontal-negative.svg" alt="Timefold logo" width="200">
+        <nav class="navbar sticky-top navbar-expand-lg shadow-sm mb-3" style="background-color: #ffffff;">
+          <a class="navbar-brand" href="https://www.solverforge.org">
+            <img src="/webjars/solverforge/img/solverforge-horizontal.svg" alt="SolverForge logo" width="400">
           </a>
           <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
             <span class="navbar-toggler-icon"></span>
@@ -488,19 +478,19 @@ function replaceQuickstartTimefoldAutoHeaderFooter() {
           <div class="collapse navbar-collapse" id="navbarNav">
             <ul class="nav nav-pills">
               <li class="nav-item active" id="navUIItem">
-                <button class="nav-link active" id="navUI" data-bs-toggle="pill" data-bs-target="#demo" type="button">Demo UI</button>
+                <button class="nav-link active" id="navUI" data-bs-toggle="pill" data-bs-target="#demo" type="button" style="color: #1f2937;">Demo UI</button>
               </li>
               <li class="nav-item" id="navRestItem">
-                <button class="nav-link" id="navRest" data-bs-toggle="pill" data-bs-target="#rest" type="button">Guide</button>
+                <button class="nav-link" id="navRest" data-bs-toggle="pill" data-bs-target="#rest" type="button" style="color: #1f2937;">Guide</button>
               </li>
               <li class="nav-item" id="navOpenApiItem">
-                <button class="nav-link" id="navOpenApi" data-bs-toggle="pill" data-bs-target="#openapi" type="button">REST API</button>
+                <button class="nav-link" id="navOpenApi" data-bs-toggle="pill" data-bs-target="#openapi" type="button" style="color: #1f2937;">REST API</button>
               </li>
             </ul>
           </div>
           <div class="ms-auto">
               <div class="dropdown">
-                  <button class="btn btn-secondary dropdown-toggle" type="button" id="dropdownMenuButton" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                  <button class="btn dropdown-toggle" type="button" id="dropdownMenuButton" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false" style="background-color: #10b981; color: #ffffff; border-color: #10b981;">
                       Data
                   </button>
                   <div id="testDataButton" class="dropdown-menu" aria-labelledby="dropdownMenuButton"></div>
@@ -510,19 +500,19 @@ function replaceQuickstartTimefoldAutoHeaderFooter() {
       </div>`));
     }
 
-    const timefoldFooter = $("footer#timefold-auto-footer");
-    if (timefoldFooter != null) {
-        timefoldFooter.append(
+    const solverforgeFooter = $("footer#solverforge-auto-footer");
+    if (solverforgeFooter != null) {
+        solverforgeFooter.append(
             $(`<footer class="bg-black text-white-50">
                <div class="container">
                  <div class="hstack gap-3 p-4">
-                   <div class="ms-auto"><a class="text-white" href="https://timefold.ai">Timefold</a></div>
+                   <div class="ms-auto"><a class="text-white" href="https://www.solverforge.org">SolverForge</a></div>
                    <div class="vr"></div>
-                   <div><a class="text-white" href="https://timefold.ai/docs">Documentation</a></div>
+                   <div><a class="text-white" href="https://www.solverforge.org/docs">Documentation</a></div>
                    <div class="vr"></div>
-                   <div><a class="text-white" href="https://github.com/TimefoldAI/timefold-solver-python">Code</a></div>
+                   <div><a class="text-white" href="https://github.com/SolverForge/solverforge-legacy">Code</a></div>
                    <div class="vr"></div>
-                   <div class="me-auto"><a class="text-white" href="https://timefold.ai/product/support/">Support</a></div>
+                   <div class="me-auto"><a class="text-white" href="mailto:info@solverforge.org">Support</a></div>
                  </div>
                </div>
              </footer>`));

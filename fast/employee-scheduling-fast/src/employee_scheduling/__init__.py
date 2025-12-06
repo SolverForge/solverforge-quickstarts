@@ -4,10 +4,13 @@ from .rest_api import app
 
 
 def main():
-    config = uvicorn.Config("employee_scheduling:app",
-                            port=8080,
-                            log_config="logging.conf",
-                            use_colors=True)
+    config = uvicorn.Config(
+        "employee_scheduling:app",
+        host="0.0.0.0",
+        port=8080,
+        log_config="logging.conf",
+        use_colors=True,
+    )
     server = uvicorn.Server(config)
     server.run()
 
