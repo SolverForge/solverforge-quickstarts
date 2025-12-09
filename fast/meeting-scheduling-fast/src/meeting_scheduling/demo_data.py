@@ -1,7 +1,7 @@
 from random import Random
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import List, Tuple, Any, Callable
+from typing import List
 from dataclasses import dataclass
 
 from .domain import Person, TimeGrain, Room, Meeting, MeetingAssignment, MeetingSchedule, RequiredAttendance, PreferredAttendance
