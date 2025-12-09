@@ -1,11 +1,7 @@
-from fastapi import FastAPI, Depends, Request
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from typing import Annotated, Dict, List
+from typing import Dict, List
 from uuid import uuid4
-from fastapi.encoders import jsonable_encoder
-import json
-
-from solverforge_legacy.solver import SolverManager, SolutionManager
 
 from .domain import MeetingSchedule
 from .converters import MeetingScheduleModel, schedule_to_model, model_to_schedule
