@@ -320,6 +320,20 @@ class VehicleRoutePlan:
             out += vehicle.total_driving_time_seconds
         return out
 
+    @property
+    def start_date_time(self) -> Optional[datetime]:
+        """Earliest vehicle departure time - for timeline window."""
+        if not self.vehicles:
+            return None
+        return min(v.departure_time for v in self.vehicles)
+
+    @property
+    def end_date_time(self) -> Optional[datetime]:
+        """Latest vehicle arrival time - for timeline window."""
+        if not self.vehicles:
+            return None
+        return max(v.arrival_time for v in self.vehicles)
+
     def __str__(self):
         return f"VehicleRoutePlan(name={self.name}, vehicles={self.vehicles}, visits={self.visits})"
 
@@ -343,6 +357,9 @@ class VisitModel(JsonDomainBase):
     next_visit: Union[str, "VisitModel", None] = Field(None, alias="nextVisit")
     arrival_time: Optional[str] = Field(
         None, alias="arrivalTime"
+    )  # ISO datetime string
+    start_service_time: Optional[str] = Field(
+        None, alias="startServiceTime"
     )  # ISO datetime string
     departure_time: Optional[str] = Field(
         None, alias="departureTime"
@@ -379,3 +396,5 @@ class VehicleRoutePlanModel(JsonDomainBase):
     score: Optional[str] = None
     solver_status: Optional[str] = None
     total_driving_time_seconds: int = Field(0, alias="totalDrivingTimeSeconds")
+    start_date_time: Optional[str] = Field(None, alias="startDateTime")
+    end_date_time: Optional[str] = Field(None, alias="endDateTime")

@@ -110,6 +110,31 @@
     .map-hint.hidden {
       opacity: 0;
     }
+
+    /* Timeline enhancements */
+    .timeline-stop-badge {
+      background-color: #6366f1;
+      color: white;
+      padding: 1px 6px;
+      border-radius: 10px;
+      font-size: 0.7rem;
+      font-weight: bold;
+      margin-right: 4px;
+    }
+    .timeline-status-icon {
+      margin-left: 4px;
+      font-size: 0.85rem;
+    }
+    .timeline-status-ontime { color: #10b981; }
+    .timeline-status-late { color: #ef4444; }
+    .timeline-status-early { color: #3b82f6; }
+    .vis-item .vis-item-content {
+      font-size: 0.85rem;
+      padding: 2px 4px;
+    }
+    .vis-labelset .vis-label {
+      padding: 4px 8px;
+    }
   </style>
 </head>
 <body>
@@ -134,16 +159,16 @@
                       role="tab" aria-controls="mapPanel" aria-selected="false">Map
               </button>
             </li>
-            <!-- <li class="nav-item" role="presentation"> -->
-            <!--   <button class="nav-link" id="byVehicleTab" data-bs-toggle="tab" data-bs-target="#byVehiclePanel" -->
-            <!--           type="button" role="tab" aria-controls="byVehiclePanel" aria-selected="true">By vehicle -->
-            <!--   </button> -->
-            <!-- </li> -->
-            <!-- <li class="nav-item" role="presentation"> -->
-            <!--   <button class="nav-link" id="byVisitTab" data-bs-toggle="tab" data-bs-target="#byVisitPanel" -->
-            <!--           type="button" role="tab" aria-controls="byVisitPanel" aria-selected="false">By visit -->
-            <!--   </button> -->
-            <!-- </li> -->
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="byVehicleTab" data-bs-toggle="tab" data-bs-target="#byVehiclePanel"
+                      type="button" role="tab" aria-controls="byVehiclePanel" aria-selected="false">By vehicle
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="byVisitTab" data-bs-toggle="tab" data-bs-target="#byVisitPanel"
+                      type="button" role="tab" aria-controls="byVisitPanel" aria-selected="false">By visit
+              </button>
+            </li>
           </ul>
         </div>
         <div class="col-3">

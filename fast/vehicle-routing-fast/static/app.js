@@ -841,16 +841,49 @@ function renderTimelines(routePlan) {
   byVehicleItemData.clear();
   byVisitItemData.clear();
 
+  // Build lookup maps for enhanced display
+  const vehicleById = new Map(routePlan.vehicles.map(v => [v.id, v]));
+  const visitById = new Map(routePlan.visits.map(v => [v.id, v]));
+  const visitOrderMap = new Map();
+
+  // Build stop order for each visit
+  routePlan.vehicles.forEach(vehicle => {
+    vehicle.visits.forEach((visitId, index) => {
+      visitOrderMap.set(visitId, index + 1);
+    });
+  });
+
+  // Vehicle groups with names and status summary
   $.each(routePlan.vehicles, function (index, vehicle) {
+    const vehicleName = vehicle.name || `Vehicle ${vehicle.id}`;
     const { totalDemand, capacity } = vehicle;
-    const percentage = (totalDemand / capacity) * 100;
-    const vehicleWithLoad = `<h5 class="card-title mb-1">vehicle-${vehicle.id}</h5>
-                                 <div class="progress" data-bs-toggle="tooltip-load" data-bs-placement="left"
-                                      data-html="true" title="Cargo: ${totalDemand} / Capacity: ${capacity}">
-                                   <div class="progress-bar" role="progressbar" style="width: ${percentage}%">
-                                      ${totalDemand}/${capacity}
-                                   </div>
-                                 </div>`;
+    const percentage = Math.min((totalDemand / capacity) * 100, 100);
+    const overCapacity = totalDemand > capacity;
+
+    // Count late visits for this vehicle
+    const vehicleVisits = vehicle.visits.map(id => visitById.get(id)).filter(v => v);
+    const lateCount = vehicleVisits.filter(v => {
+      if (!v.departureTime) return false;
+      const departure = JSJoda.LocalDateTime.parse(v.departureTime);
+      const maxEnd = JSJoda.LocalDateTime.parse(v.maxEndTime);
+      return departure.isAfter(maxEnd);
+    }).length;
+
+    const statusIcon = lateCount > 0
+      ? `<i class="fas fa-exclamation-triangle timeline-status-late timeline-status-icon" title="${lateCount} late"></i>`
+      : vehicle.visits.length > 0
+        ? `<i class="fas fa-check-circle timeline-status-ontime timeline-status-icon" title="All on-time"></i>`
+        : '';
+
+    const progressBarClass = overCapacity ? 'bg-danger' : '';
+
+    const vehicleWithLoad = `
+      <h5 class="card-title mb-1">${vehicleName}${statusIcon}</h5>
+      <div class="progress" style="height: 16px;" title="Cargo: ${totalDemand} / ${capacity}">
+        <div class="progress-bar ${progressBarClass}" role="progressbar" style="width: ${percentage}%">
+          ${totalDemand}/${capacity}
+        </div>
+      </div>`;
     byVehicleGroupData.add({ id: vehicle.id, content: vehicleWithLoad });
   });
 
@@ -859,6 +892,7 @@ function renderTimelines(routePlan) {
     const maxEndTime = JSJoda.LocalDateTime.parse(visit.maxEndTime);
     const serviceDuration = JSJoda.Duration.ofSeconds(visit.serviceDuration);
     const customerType = getCustomerType(visit);
+    const stopNumber = visitOrderMap.get(visit.id);
 
     const visitGroupElement = $(`<div/>`).append(
       $(`<h5 class="card-title mb-1"/>`).html(
@@ -884,7 +918,7 @@ function renderTimelines(routePlan) {
 
     if (visit.vehicle == null) {
       const byJobJobElement = $(`<div/>`).append(
-        $(`<h5 class="card-title mb-1"/>`).text(`Unassigned`),
+        $(`<span/>`).html(`<i class="fas fa-exclamation-circle text-danger me-1"></i>Unassigned`),
       );
 
       // Unassigned are shown at the beginning of the visit's time window; the length is the service duration.
@@ -899,23 +933,35 @@ function renderTimelines(routePlan) {
     } else {
       const arrivalTime = JSJoda.LocalDateTime.parse(visit.arrivalTime);
       const beforeReady = arrivalTime.isBefore(minStartTime);
-      const arrivalPlusService = arrivalTime.plus(serviceDuration);
-      const afterDue = arrivalPlusService.isAfter(maxEndTime);
+      const departureTime = JSJoda.LocalDateTime.parse(visit.departureTime);
+      const afterDue = departureTime.isAfter(maxEndTime);
+
+      // Get vehicle info for display
+      const vehicleInfo = vehicleById.get(visit.vehicle);
+      const vehicleName = vehicleInfo ? (vehicleInfo.name || `Vehicle ${visit.vehicle}`) : `Vehicle ${visit.vehicle}`;
+
+      // Stop badge for service segment
+      const stopBadge = stopNumber ? `<span class="timeline-stop-badge">${stopNumber}</span>` : '';
+
+      // Status icon based on timing
+      const statusIcon = afterDue
+        ? `<i class="fas fa-exclamation-triangle timeline-status-late timeline-status-icon" title="Late"></i>`
+        : `<i class="fas fa-check timeline-status-ontime timeline-status-icon" title="On-time"></i>`;
 
       const byVehicleElement = $(`<div/>`)
-        .append("<div/>")
-        .append($(`<h5 class="card-title mb-1"/>`).html(
-          `<i class="fas ${customerType.icon}" style="color: ${customerType.color}"></i> ${visit.name}`
+        .append($(`<span/>`).html(
+          `${stopBadge}<i class="fas ${customerType.icon}" style="color: ${customerType.color}"></i> ${visit.name}${statusIcon}`
         ));
 
       const byVisitElement = $(`<div/>`)
-        // visit.vehicle is the vehicle.id due to Jackson serialization
         .append(
-          $(`<h5 class="card-title mb-1"/>`).text("vehicle-" + visit.vehicle),
+          $(`<span/>`).html(
+            `${stopBadge}${vehicleName}${statusIcon}`
+          ),
         );
 
       const byVehicleTravelElement = $(`<div/>`).append(
-        $(`<h5 class="card-title mb-1"/>`).text("Travel"),
+        $(`<span/>`).html(`<i class="fas fa-route text-warning me-1"></i>Travel`),
       );
 
       const previousDeparture = arrivalTime.minusSeconds(
@@ -923,32 +969,35 @@ function renderTimelines(routePlan) {
       );
       byVehicleItemData.add({
         id: visit.id + "_travel",
-        group: visit.vehicle, // visit.vehicle is the vehicle.id due to Jackson serialization
+        group: visit.vehicle,
         subgroup: visit.vehicle,
         content: byVehicleTravelElement.html(),
         start: previousDeparture.toString(),
         end: visit.arrivalTime,
         style: "background-color: #f7dd8f90",
       });
+
       if (beforeReady) {
         const byVehicleWaitElement = $(`<div/>`).append(
-          $(`<h5 class="card-title mb-1"/>`).text("Wait"),
+          $(`<span/>`).html(`<i class="fas fa-clock timeline-status-early me-1"></i>Wait`),
         );
 
         byVehicleItemData.add({
           id: visit.id + "_wait",
-          group: visit.vehicle, // visit.vehicle is the vehicle.id due to Jackson serialization
+          group: visit.vehicle,
           subgroup: visit.vehicle,
           content: byVehicleWaitElement.html(),
           start: visit.arrivalTime,
           end: visit.minStartTime,
+          style: "background-color: #93c5fd80",
         });
       }
+
       let serviceElementBackground = afterDue ? "#EF292999" : "#83C15955";
 
       byVehicleItemData.add({
         id: visit.id + "_service",
-        group: visit.vehicle, // visit.vehicle is the vehicle.id due to Jackson serialization
+        group: visit.vehicle,
         subgroup: visit.vehicle,
         content: byVehicleElement.html(),
         start: visit.startServiceTime,
@@ -976,10 +1025,10 @@ function renderTimelines(routePlan) {
       if (lastVisit) {
         byVehicleItemData.add({
           id: vehicle.id + "_travelBackToHomeLocation",
-          group: vehicle.id, // visit.vehicle is the vehicle.id due to Jackson serialization
+          group: vehicle.id,
           subgroup: vehicle.id,
           content: $(`<div/>`)
-            .append($(`<h5 class="card-title mb-1"/>`).text("Travel"))
+            .append($(`<span/>`).html(`<i class="fas fa-home text-secondary me-1"></i>Return`))
             .html(),
           start: lastVisit.departureTime,
           end: vehicle.arrivalTime,
