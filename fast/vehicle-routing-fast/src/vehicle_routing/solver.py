@@ -6,7 +6,7 @@ from solverforge_legacy.solver.config import (
     Duration,
 )
 
-from .domain import *
+from .domain import Vehicle, VehicleRoutePlan, Visit
 from .constraints import define_constraints
 
 

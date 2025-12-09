@@ -31,6 +31,7 @@ def visit_to_model(visit: domain.Visit) -> domain.VisitModel:
 def vehicle_to_model(vehicle: domain.Vehicle) -> domain.VehicleModel:
     return domain.VehicleModel(
         id=vehicle.id,
+        name=vehicle.name,
         capacity=vehicle.capacity,
         home_location=location_to_model(vehicle.home_location),
         departure_time=vehicle.departure_time.isoformat(),
@@ -153,6 +154,7 @@ def model_to_plan(model: domain.VehicleRoutePlanModel) -> domain.VehicleRoutePla
     for vehicle_model in model.vehicles:
         vehicle = domain.Vehicle(
             id=vehicle_model.id,
+            name=vehicle_model.name,
             capacity=vehicle_model.capacity,
             home_location=model_to_location(vehicle_model.home_location),
             departure_time=datetime.fromisoformat(vehicle_model.departure_time),

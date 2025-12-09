@@ -4,7 +4,7 @@ from solverforge_legacy.solver.score import (
     constraint_provider,
 )
 
-from .domain import *
+from .domain import Vehicle, Visit
 
 VEHICLE_CAPACITY = "vehicleCapacity"
 MINIMIZE_TRAVEL_TIME = "minimizeTravelTime"

@@ -8,9 +8,6 @@ Find the most efficient routes for a fleet of vehicles.
 - [Run the application](#run-the-application)
 - [Test the application](#test-the-application)
 
-> [!TIP]
-> <img src="https://docs.timefold.ai/_/img/models/field-service-routing.svg" align="right" width="50px" /> [Check out our off-the-shelf model for Field Service Routing](https://app.timefold.ai/models/field-service-routing/v1). This model goes beyond basic Vehicle Routing and supports additional constraints such as priorities, skills, fairness and more.
-
 ## Prerequisites
 
 1. Install [Python 3.10, 3.11 or 3.12](https://www.python.org/downloads/).
@@ -21,11 +18,11 @@ Find the most efficient routes for a fleet of vehicles.
 
 ## Run the application
 
-1. Git clone the timefold-solver-python repo and navigate to this directory:
+1. Git clone the solverforge-quickstarts repo and navigate to this directory:
    ```sh
-   $ git clone https://github.com/TimefoldAI/timefold-solver-python.git
+   $ git clone https://github.com/SolverForge/solverforge-quickstarts.git
    ...
-   $ cd timefold-solver-python/quickstarts/vehicle-routing
+   $ cd solverforge-quickstarts/fast/vehicle-routing-fast
    ```
 
 2. Create a virtual environment:
@@ -61,4 +58,4 @@ Find the most efficient routes for a fleet of vehicles.
 
 ## More information
 
-Visit [timefold.ai](https://timefold.ai).
+Visit [solverforge.org](https://www.solverforge.org).

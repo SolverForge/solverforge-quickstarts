@@ -1,13 +1,20 @@
 from solverforge_legacy.solver.test import ConstraintVerifier
 
-from vehicle_routing.domain import *
-from vehicle_routing.constraints import *
+from vehicle_routing.domain import Location, Vehicle, VehicleRoutePlan, Visit
+from vehicle_routing.constraints import (
+    define_constraints,
+    vehicle_capacity,
+    service_finished_after_max_end_time,
+    minimize_travel_time,
+)
 
 from datetime import datetime, timedelta
 
-# LOCATION_1 to LOCATION_2 is sqrt(3**2 + 4**2) * 4000 == 20_000 seconds of driving time
-# LOCATION_2 to LOCATION_3 is sqrt(3**2 + 4**2) * 4000 == 20_000 seconds of driving time
-# LOCATION_1 to LOCATION_3 is sqrt(1**2 + 1**2) * 4000 == 5_656 seconds of driving time
+# Driving times calculated using Haversine formula for realistic geographic distances.
+# These test coordinates at 50 km/h average speed yield:
+# LOCATION_1 to LOCATION_2: 40018 seconds (~11.1 hours, ~556 km)
+# LOCATION_2 to LOCATION_3: 40025 seconds (~11.1 hours, ~556 km)
+# LOCATION_1 to LOCATION_3: 11322 seconds (~3.1 hours, ~157 km)
 
 LOCATION_1 = Location(latitude=0, longitude=0)
 LOCATION_2 = Location(latitude=3, longitude=4)
@@ -25,7 +32,7 @@ constraint_verifier = ConstraintVerifier.build(
 
 def test_vehicle_capacity_unpenalized():
     vehicleA = Vehicle(
-        id="1", capacity=100, home_location=LOCATION_1, departure_time=DEPARTURE_TIME
+        id="1", name="Alpha", capacity=100, home_location=LOCATION_1, departure_time=DEPARTURE_TIME
     )
     visit1 = Visit(
         id="2",
@@ -47,7 +54,7 @@ def test_vehicle_capacity_unpenalized():
 
 def test_vehicle_capacity_penalized():
     vehicleA = Vehicle(
-        id="1", capacity=100, home_location=LOCATION_1, departure_time=DEPARTURE_TIME
+        id="1", name="Alpha", capacity=100, home_location=LOCATION_1, departure_time=DEPARTURE_TIME
     )
     visit1 = Visit(
         id="2",
@@ -79,7 +86,7 @@ def test_vehicle_capacity_penalized():
 
 def test_service_finished_after_max_end_time_unpenalized():
     vehicleA = Vehicle(
-        id="1", capacity=100, home_location=LOCATION_1, departure_time=DEPARTURE_TIME
+        id="1", name="Alpha", capacity=100, home_location=LOCATION_1, departure_time=DEPARTURE_TIME
     )
     visit1 = Visit(
         id="2",
@@ -102,7 +109,7 @@ def test_service_finished_after_max_end_time_unpenalized():
 
 def test_service_finished_after_max_end_time_penalized():
     vehicleA = Vehicle(
-        id="1", capacity=100, home_location=LOCATION_1, departure_time=DEPARTURE_TIME
+        id="1", name="Alpha", capacity=100, home_location=LOCATION_1, departure_time=DEPARTURE_TIME
     )
     visit1 = Visit(
         id="2",
@@ -116,20 +123,23 @@ def test_service_finished_after_max_end_time_penalized():
 
     connect(vehicleA, visit1)
 
-    # Service duration = 1 hour
-    # Travel time ~= 5.5 hours
-    # Max end time = 5 hours after vehicle departure
-    # So (5.5 + 1) - 5 ~= 1.5 hours penalty, or about 90 minutes
+    # With Haversine formula:
+    # Travel time to LOCATION_2: 40018 seconds = 11.12 hours
+    # Arrival time: 2020-01-01 11:06:58
+    # Service duration: 1 hour
+    # End service: 2020-01-01 12:06:58
+    # Max end time: 2020-01-01 05:00:00
+    # Delay: 7 hours 6 minutes 58 seconds = 426.97 minutes, rounded up = 427 minutes
     (
         constraint_verifier.verify_that(service_finished_after_max_end_time)
         .given(vehicleA, visit1)
-        .penalizes_by(94)
+        .penalizes_by(427)
     )
 
 
 def test_total_driving_time():
     vehicleA = Vehicle(
-        id="1", capacity=100, home_location=LOCATION_1, departure_time=DEPARTURE_TIME
+        id="1", name="Alpha", capacity=100, home_location=LOCATION_1, departure_time=DEPARTURE_TIME
     )
     visit1 = Visit(
         id="2",
@@ -152,12 +162,15 @@ def test_total_driving_time():
 
     connect(vehicleA, visit1, visit2)
 
+    # With Haversine formula:
+    # LOCATION_1 -> LOCATION_2: 40018 seconds
+    # LOCATION_2 -> LOCATION_3: 40025 seconds
+    # LOCATION_3 -> LOCATION_1: 11322 seconds
+    # Total: 91365 seconds
     (
         constraint_verifier.verify_that(minimize_travel_time)
         .given(vehicleA, visit1, visit2)
-        .penalizes_by(
-            45657
-        )  # The sum of the approximate driving time between all three locations.
+        .penalizes_by(91365)
     )
 
 

@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from typing import Annotated
 
-from .json_serialization import *
+from solverforge_legacy.solver.score import HardSoftScore
+from .json_serialization import ScoreSerializer
 
 
 @dataclass

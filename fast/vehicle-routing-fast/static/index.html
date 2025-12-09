@@ -4,18 +4,117 @@
   <meta charset="utf-8">
   <meta http-equiv="content-type" content="text/html; charset=UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-  <title>Vehicle Routing - Timefold Solver for Python</title>
+  <title>Vehicle Routing - SolverForge for Python</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/vis-timeline@7.7.2/styles/vis-timeline-graph2d.min.css"
         integrity="sha256-svzNasPg1yR5gvEaRei2jg+n4Pc3sVyMUWeS6xRAh6U=" crossorigin="anonymous">
-  <link rel="stylesheet" href="/webjars/timefold/css/timefold-webui.css"/>
-  <link rel="icon" href="/webjars/timefold/img/timefold-favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/webjars/solverforge/css/solverforge-webui.css"/>
+  <link rel="icon" href="/webjars/solverforge/img/solverforge-favicon.svg" type="image/svg+xml">
+  <style>
+    /* Customer marker icons */
+    .customer-marker, .vehicle-home-marker, .temp-vehicle-marker {
+      background: transparent !important;
+      border: none !important;
+    }
+
+    /* Pulse animation for new vehicle placement */
+    @keyframes pulse {
+      0% { transform: scale(1); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
+      50% { transform: scale(1.1); box-shadow: 0 4px 8px rgba(99, 102, 241, 0.6); }
+      100% { transform: scale(1); box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
+    }
+
+    /* Customer type buttons in modal */
+    .customer-type-btn {
+      transition: all 0.2s ease;
+      padding: 0.75rem 0.5rem;
+    }
+    .customer-type-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    }
+
+    /* Vehicle table styling */
+    #vehicles tr.vehicle-row {
+      transition: background-color 0.2s ease;
+    }
+    #vehicles tr.vehicle-row:hover {
+      background-color: rgba(99, 102, 241, 0.1);
+    }
+    #vehicles tr.vehicle-row.table-active {
+      background-color: rgba(99, 102, 241, 0.15) !important;
+    }
+
+    /* Route number markers */
+    .route-number-marker {
+      background: transparent !important;
+      border: none !important;
+    }
+
+    /* Notification panel */
+    #notificationPanel {
+      z-index: 1050;
+    }
+
+    /* Click hint for vehicle rows */
+    #vehicles tr.vehicle-row td:not(:last-child) {
+      cursor: pointer;
+    }
+
+    /* Solving spinner */
+    #solvingSpinner {
+      display: none;
+      width: 1.25rem;
+      height: 1.25rem;
+      border: 2px solid #10b981;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+      vertical-align: middle;
+    }
+    #solvingSpinner.active {
+      display: inline-block;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Progress bar text should stay horizontal and inside */
+    .progress-bar {
+      overflow: visible;
+      white-space: nowrap;
+    }
+
+    /* Map hint overlay */
+    .map-hint {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background-color: rgba(255, 255, 255, 0.95);
+      padding: 8px 16px;
+      border-radius: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      font-size: 0.9rem;
+      color: #374151;
+      z-index: 1000;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+    .map-hint i {
+      color: #10b981;
+      margin-right: 6px;
+    }
+    .map-hint.hidden {
+      opacity: 0;
+    }
+  </style>
 </head>
 <body>
 
-<header id="timefold-auto-header">
+<header id="solverforge-auto-header">
   <!-- Filled in by app.js -->
 </header>
 <div class="tab-content">
@@ -35,16 +134,16 @@
                       role="tab" aria-controls="mapPanel" aria-selected="false">Map
               </button>
             </li>
-            <li class="nav-item" role="presentation">
-              <button class="nav-link" id="byVehicleTab" data-bs-toggle="tab" data-bs-target="#byVehiclePanel"
-                      type="button" role="tab" aria-controls="byVehiclePanel" aria-selected="true">By vehicle
-              </button>
-            </li>
-            <li class="nav-item" role="presentation">
-              <button class="nav-link" id="byVisitTab" data-bs-toggle="tab" data-bs-target="#byVisitPanel"
-                      type="button" role="tab" aria-controls="byVisitPanel" aria-selected="false">By visit
-              </button>
-            </li>
+            <!-- <li class="nav-item" role="presentation"> -->
+            <!--   <button class="nav-link" id="byVehicleTab" data-bs-toggle="tab" data-bs-target="#byVehiclePanel" -->
+            <!--           type="button" role="tab" aria-controls="byVehiclePanel" aria-selected="true">By vehicle -->
+            <!--   </button> -->
+            <!-- </li> -->
+            <!-- <li class="nav-item" role="presentation"> -->
+            <!--   <button class="nav-link" id="byVisitTab" data-bs-toggle="tab" data-bs-target="#byVisitPanel" -->
+            <!--           type="button" role="tab" aria-controls="byVisitPanel" aria-selected="false">By visit -->
+            <!--   </button> -->
+            <!-- </li> -->
           </ul>
         </div>
         <div class="col-3">
@@ -54,6 +153,7 @@
           <button id="stopSolvingButton" type="button" class="btn btn-danger p-2">
             <i class="fas fa-stop"></i> Stop solving
           </button>
+          <span id="solvingSpinner" class="ms-2"></span>
           <span id="score" class="score ms-2 align-middle fw-bold">Score: ?</span>
           <button id="analyzeButton" type="button" class="ms-2 btn btn-secondary">
             <span class="fas fa-question"></span>
@@ -66,8 +166,11 @@
 
       <div class="tab-pane fade show active" id="mapPanel" role="tabpanel" aria-labelledby="mapTab">
         <div class="row">
-          <div class="col-7 col-lg-8 col-xl-9">
+          <div class="col-7 col-lg-8 col-xl-9 position-relative">
             <div id="map" style="width: 100%; height: 100vh;"></div>
+            <div id="mapHint" class="map-hint">
+              <i class="fas fa-mouse-pointer"></i> Click on the map to add a new visit
+            </div>
           </div>
           <div class="col-5 col-lg-4 col-xl-3" style="height: 100vh; overflow-y: scroll;">
             <div class="row pt-2 row-cols-1">
@@ -82,20 +185,42 @@
                   </tr>
                 </table>
               </div>
+              <div class="col mb-3">
+                <h5>Time Windows</h5>
+                <div class="d-flex flex-column gap-1">
+                  <div><i class="fas fa-utensils" style="color: #f59e0b; width: 20px;"></i> <strong>Restaurant</strong> <small class="text-muted">06:00-10:00 · 20-40 min</small></div>
+                  <div><i class="fas fa-building" style="color: #3b82f6; width: 20px;"></i> <strong>Business</strong> <small class="text-muted">09:00-17:00 · 15-30 min</small></div>
+                  <div><i class="fas fa-home" style="color: #10b981; width: 20px;"></i> <strong>Residential</strong> <small class="text-muted">17:00-20:00 · 5-10 min</small></div>
+                </div>
+              </div>
               <div class="col">
-                <h5>Vehicles</h5>
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <div>
+                    <h5 class="mb-0">Vehicles</h5>
+                    <small class="text-muted"><i class="fas fa-hand-pointer"></i> Click to highlight route</small>
+                  </div>
+                  <div class="btn-group btn-group-sm" role="group" aria-label="Vehicle management">
+                    <button type="button" class="btn btn-outline-danger" id="removeVehicleBtn" title="Remove last vehicle">
+                      <i class="fas fa-minus"></i>
+                    </button>
+                    <button type="button" class="btn btn-outline-success" id="addVehicleBtn" title="Add new vehicle">
+                      <i class="fas fa-plus"></i>
+                    </button>
+                  </div>
+                </div>
                 <table class="table-sm w-100">
                   <thead>
                   <tr>
                     <th class="col-1"></th>
                     <th class="col-3">Name</th>
                     <th class="col-3">
-                      Load
+                      Cargo
                       <i class="fas fa-info-circle" data-bs-toggle="tooltip" data-bs-placement="top"
                          data-html="true"
-                         title="Vehicle load is displayed as: total cargo / vehicle capacity."></i>
+                         title="Units to deliver on this route. Each customer requires cargo units (e.g., packages, crates). Bar shows current load vs. vehicle capacity."></i>
                     </th>
-                    <th class="col-3">Driving time</th>
+                    <th class="col-2">Drive</th>
+                    <th class="col-1"></th>
                   </tr>
                   </thead>
                   <tbody id="vehicles"></tbody>
@@ -200,7 +325,57 @@
         </div>
     </div>
 </form>
-<footer id="timefold-auto-footer"></footer>
+<!-- Add Vehicle Modal -->
+<div class="modal fade" id="addVehicleModal" tabindex="-1" aria-labelledby="addVehicleModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="addVehicleModalLabel"><i class="fas fa-truck"></i> Add New Vehicle</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label for="vehicleName" class="form-label">Name</label>
+          <input type="text" class="form-control" id="vehicleName" placeholder="e.g., Kilo">
+          <div class="form-text">Unique name for the vehicle</div>
+        </div>
+        <div class="mb-3">
+          <label for="vehicleCapacity" class="form-label">Capacity</label>
+          <input type="number" class="form-control" id="vehicleCapacity" value="25" min="1">
+          <div class="form-text">Maximum cargo the vehicle can carry</div>
+        </div>
+        <div class="mb-3">
+          <label for="vehicleDepartureTime" class="form-label">Departure Time</label>
+          <input type="text" class="form-control" id="vehicleDepartureTime">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Home Location</label>
+          <div class="d-flex gap-2 mb-2">
+            <button type="button" class="btn btn-outline-primary btn-sm" id="pickLocationBtn">
+              <i class="fas fa-map-marker-alt"></i> Pick on Map
+            </button>
+            <span class="text-muted small align-self-center">or enter coordinates:</span>
+          </div>
+          <div class="row g-2">
+            <div class="col-6">
+              <input type="number" step="any" class="form-control" id="vehicleHomeLat" placeholder="Latitude">
+            </div>
+            <div class="col-6">
+              <input type="number" step="any" class="form-control" id="vehicleHomeLng" placeholder="Longitude">
+            </div>
+          </div>
+          <div id="vehicleLocationPreview" class="mt-2 text-muted small"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-success" id="confirmAddVehicle"><i class="fas fa-plus"></i> Add Vehicle</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer id="solverforge-auto-footer"></footer>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css">
@@ -211,8 +386,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/js-joda/1.11.0/js-joda.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/vis-timeline@7.7.2/standalone/umd/vis-timeline-graph2d.min.js"
         integrity="sha256-Jy2+UO7rZ2Dgik50z3XrrNpnc5+2PAx9MhL2CicodME=" crossorigin="anonymous"></script>
-<script src="/webjars/timefold/js/timefold-webui.js"></script>
+<script src="/webjars/solverforge/js/solverforge-webui.js"></script>
 <script src="/score-analysis.js"></script>
+<script src="/recommended-fit.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

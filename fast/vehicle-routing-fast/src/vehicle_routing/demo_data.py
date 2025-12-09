@@ -4,16 +4,59 @@ from enum import Enum
 from random import Random
 from dataclasses import dataclass
 
-from .domain import *
+from .domain import Location, Vehicle, VehicleRoutePlan, Visit, init_driving_time_matrix, clear_driving_time_matrix
 
 
 FIRST_NAMES = ("Amy", "Beth", "Carl", "Dan", "Elsa", "Flo", "Gus", "Hugo", "Ivy", "Jay")
 LAST_NAMES = ("Cole", "Fox", "Green", "Jones", "King", "Li", "Poe", "Rye", "Smith", "Watt")
-SERVICE_DURATION_MINUTES = (10, 20, 30, 40)
-MORNING_WINDOW_START = time(8, 0)
-MORNING_WINDOW_END = time(12, 0)
-AFTERNOON_WINDOW_START = time(13, 0)
-AFTERNOON_WINDOW_END = time(18, 0)
+
+# Vehicle names using phonetic alphabet for clear identification
+VEHICLE_NAMES = ("Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliet")
+
+
+class CustomerType(Enum):
+    """
+    Customer types with realistic time windows, demand patterns, and service durations.
+
+    Each customer type reflects real-world delivery scenarios:
+    - RESIDENTIAL: Evening deliveries when people are home from work (5-10 min unload)
+    - BUSINESS: Standard business hours with larger orders (15-30 min unload, paperwork)
+    - RESTAURANT: Early morning before lunch prep rush (20-40 min for bulk unload, inspection)
+    """
+    # (label, window_start, window_end, min_demand, max_demand, min_service_min, max_service_min)
+    RESIDENTIAL = ("residential", time(17, 0), time(20, 0), 1, 2, 5, 10)
+    BUSINESS = ("business", time(9, 0), time(17, 0), 3, 6, 15, 30)
+    RESTAURANT = ("restaurant", time(6, 0), time(10, 0), 5, 10, 20, 40)
+
+    def __init__(self, label: str, window_start: time, window_end: time,
+                 min_demand: int, max_demand: int, min_service_minutes: int, max_service_minutes: int):
+        self.label = label
+        self.window_start = window_start
+        self.window_end = window_end
+        self.min_demand = min_demand
+        self.max_demand = max_demand
+        self.min_service_minutes = min_service_minutes
+        self.max_service_minutes = max_service_minutes
+
+
+# Weighted distribution: 50% residential, 30% business, 20% restaurant
+CUSTOMER_TYPE_WEIGHTS = [
+    (CustomerType.RESIDENTIAL, 50),
+    (CustomerType.BUSINESS, 30),
+    (CustomerType.RESTAURANT, 20),
+]
+
+
+def random_customer_type(random: Random) -> CustomerType:
+    """Weighted random selection of customer type."""
+    total = sum(w for _, w in CUSTOMER_TYPE_WEIGHTS)
+    r = random.randint(1, total)
+    cumulative = 0
+    for ctype, weight in CUSTOMER_TYPE_WEIGHTS:
+        cumulative += weight
+        if r <= cumulative:
+            return ctype
+    return CustomerType.RESIDENTIAL  # fallback
 
 
 @dataclass
@@ -22,20 +65,12 @@ class _DemoDataProperties:
     visit_count: int
     vehicle_count: int
     vehicle_start_time: time
-    min_demand: int
-    max_demand: int
     min_vehicle_capacity: int
     max_vehicle_capacity: int
     south_west_corner: Location
     north_east_corner: Location
 
     def __post_init__(self):
-        if self.min_demand < 1:
-            raise ValueError(f"minDemand ({self.min_demand}) must be greater than zero.")
-        if self.max_demand < 1:
-            raise ValueError(f"maxDemand ({self.max_demand}) must be greater than zero.")
-        if self.min_demand >= self.max_demand:
-            raise ValueError(f"maxDemand ({self.max_demand}) must be greater than minDemand ({self.min_demand}).")
         if self.min_vehicle_capacity < 1:
             raise ValueError(f"Number of minVehicleCapacity ({self.min_vehicle_capacity}) must be greater than zero.")
         if self.max_vehicle_capacity < 1:
@@ -56,22 +91,22 @@ class _DemoDataProperties:
 
 
 class DemoData(Enum):
-    PHILADELPHIA = _DemoDataProperties(0, 55, 6, time(7, 30),
-                                       1, 2, 15, 30,
+    PHILADELPHIA = _DemoDataProperties(0, 55, 6, time(6, 0),
+                                       15, 30,
                                        Location(latitude=39.7656099067391,
                                                 longitude=-76.83782328143754),
                                        Location(latitude=40.77636644354855,
                                                 longitude=-74.9300739430771))
 
-    HARTFORT = _DemoDataProperties(1, 50, 6, time(7, 30),
-                                   1, 3, 20, 30,
+    HARTFORT = _DemoDataProperties(1, 50, 6, time(6, 0),
+                                   20, 30,
                                    Location(latitude=41.48366520850297,
                                             longitude=-73.15901689943055),
                                    Location(latitude=41.99512052869307,
                                             longitude=-72.25114548877427))
 
-    FIRENZE = _DemoDataProperties(2, 77, 6, time(7, 30),
-                                  1, 2, 20, 40,
+    FIRENZE = _DemoDataProperties(2, 77, 6, time(6, 0),
+                                  20, 40,
                                   Location(latitude=43.751466,
                                            longitude=11.177210),
                                   Location(latitude=43.809291,
@@ -103,19 +138,32 @@ def generate_names(random: Random) -> Generator[str, None, None]:
         yield f'{random.choice(FIRST_NAMES)} {random.choice(LAST_NAMES)}'
 
 
-def generate_demo_data(demo_data_enum: DemoData) -> VehicleRoutePlan:
+def generate_demo_data(demo_data_enum: DemoData, use_precomputed_matrix: bool = False) -> VehicleRoutePlan:
+    """
+    Generate demo data for vehicle routing.
+
+    Creates a realistic delivery scenario with three customer types:
+    - Residential (50%): Evening windows (17:00-20:00), small orders (1-2 units)
+    - Business (30%): Business hours (09:00-17:00), medium orders (3-6 units)
+    - Restaurant (20%): Early morning (06:00-10:00), large orders (5-10 units)
+
+    Args:
+        demo_data_enum: The demo data configuration to use
+        use_precomputed_matrix: If True, pre-compute driving time matrix for O(1) lookups.
+                               If False (default), calculate distances on-demand.
+                               Pre-computed is faster during solving but uses O(n²) memory.
+    """
     name = "demo"
     demo_data = demo_data_enum.value
     random = Random(demo_data.seed)
     latitudes = doubles(random, demo_data.south_west_corner.latitude, demo_data.north_east_corner.latitude)
     longitudes = doubles(random, demo_data.south_west_corner.longitude, demo_data.north_east_corner.longitude)
 
-    demands = ints(random, demo_data.min_demand, demo_data.max_demand + 1)
-    service_durations = values(random, SERVICE_DURATION_MINUTES)
     vehicle_capacities = ints(random, demo_data.min_vehicle_capacity,
                               demo_data.max_vehicle_capacity + 1)
 
     vehicles = [Vehicle(id=str(i),
+                        name=VEHICLE_NAMES[i % len(VEHICLE_NAMES)],
                         capacity=next(vehicle_capacities),
                         home_location=Location(
                             latitude=next(latitudes),
@@ -126,23 +174,32 @@ def generate_demo_data(demo_data_enum: DemoData) -> VehicleRoutePlan:
                 for i in range(demo_data.vehicle_count)]
 
     names = generate_names(random)
-    visits = [
-        Visit(
-             id=str(i),
-             name=next(names),
-             location=Location(latitude=next(latitudes), longitude=next(longitudes)),
-             demand=next(demands),
-             min_start_time=datetime.combine(date.today() + timedelta(days=1),
-                                             MORNING_WINDOW_START
-                                             if (morning_window := random.random() > 0.5)
-                                             else AFTERNOON_WINDOW_START),
-             max_end_time=datetime.combine(date.today() + timedelta(days=1),
-                                           MORNING_WINDOW_END
-                                           if morning_window
-                                           else AFTERNOON_WINDOW_END),
-             service_duration=timedelta(minutes=next(service_durations)),
-         ) for i in range(demo_data.visit_count)
-    ]
+    tomorrow = date.today() + timedelta(days=1)
+
+    visits = []
+    for i in range(demo_data.visit_count):
+        ctype = random_customer_type(random)
+        service_minutes = random.randint(ctype.min_service_minutes, ctype.max_service_minutes)
+        visits.append(
+            Visit(
+                id=str(i),
+                name=next(names),
+                location=Location(latitude=next(latitudes), longitude=next(longitudes)),
+                demand=random.randint(ctype.min_demand, ctype.max_demand),
+                min_start_time=datetime.combine(tomorrow, ctype.window_start),
+                max_end_time=datetime.combine(tomorrow, ctype.window_end),
+                service_duration=timedelta(minutes=service_minutes),
+            )
+        )
+
+    # Handle driving time calculation mode
+    if use_precomputed_matrix:
+        # Pre-compute driving time matrix for faster solving
+        all_locations = [v.home_location for v in vehicles] + [v.location for v in visits]
+        init_driving_time_matrix(all_locations)
+    else:
+        # Clear any existing pre-computed matrix to ensure on-demand calculation
+        clear_driving_time_matrix()
 
     return VehicleRoutePlan(name=name,
                             south_west_corner=demo_data.south_west_corner,
