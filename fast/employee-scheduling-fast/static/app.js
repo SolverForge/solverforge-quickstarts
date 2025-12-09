@@ -440,12 +440,14 @@ function refreshSolvingButtons(solving) {
     if (solving) {
         $("#solveButton").hide();
         $("#stopSolvingButton").show();
+        $("#solvingSpinner").addClass("active");
         if (autoRefreshIntervalId == null) {
             autoRefreshIntervalId = setInterval(refreshSchedule, 2000);
         }
     } else {
         $("#solveButton").show();
         $("#stopSolvingButton").hide();
+        $("#solvingSpinner").removeClass("active");
         if (autoRefreshIntervalId != null) {
             clearInterval(autoRefreshIntervalId);
             autoRefreshIntervalId = null;

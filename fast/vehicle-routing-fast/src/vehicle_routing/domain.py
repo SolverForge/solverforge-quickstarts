@@ -1,6 +1,18 @@
 from solverforge_legacy.solver import SolverStatus
 from solverforge_legacy.solver.score import HardSoftScore
-from solverforge_legacy.solver.domain import *
+from solverforge_legacy.solver.domain import (
+    planning_entity,
+    planning_solution,
+    PlanningId,
+    PlanningScore,
+    PlanningListVariable,
+    PlanningEntityCollectionProperty,
+    ValueRangeProvider,
+    InverseRelationShadowVariable,
+    PreviousElementShadowVariable,
+    NextElementShadowVariable,
+    CascadingUpdateShadowVariable,
+)
 
 from datetime import datetime, timedelta
 from typing import Annotated, Optional, List, Union
@@ -9,26 +21,136 @@ from .json_serialization import JsonDomainBase
 from pydantic import Field
 
 
+# Global driving time matrix for pre-computed mode
+# Key: (from_lat, from_lng, to_lat, to_lng) -> driving_time_seconds
+# This is kept outside the Location class to avoid transpiler issues with mutable fields
+_DRIVING_TIME_MATRIX: dict[tuple[float, float, float, float], int] = {}
+
+
+def _get_matrix_key(from_loc: "Location", to_loc: "Location") -> tuple[float, float, float, float]:
+    """Create a hashable key for the driving time matrix lookup."""
+    return (from_loc.latitude, from_loc.longitude, to_loc.latitude, to_loc.longitude)
+
+
 @dataclass
 class Location:
+    """
+    Represents a geographic location with latitude and longitude.
+
+    Driving times can be calculated in two modes:
+    1. On-demand (default): Uses Haversine formula for each calculation
+    2. Pre-computed matrix: O(1) lookup from global pre-calculated distance matrix
+
+    The pre-computed mode is faster during solving (millions of lookups)
+    but requires O(n²) memory and one-time initialization cost.
+
+    To enable pre-computed mode, call init_driving_time_matrix() with all locations
+    before solving.
+    """
     latitude: float
     longitude: float
 
+    # Earth radius in meters
+    _EARTH_RADIUS_M = 6371000
+    _TWICE_EARTH_RADIUS_M = 2 * _EARTH_RADIUS_M
+    # Average driving speed assumption: 50 km/h
+    _AVERAGE_SPEED_KMPH = 50
+
     def driving_time_to(self, other: "Location") -> int:
-        return round(
-            (
-                (self.latitude - other.latitude) ** 2
-                + (self.longitude - other.longitude) ** 2
-            )
-            ** 0.5
-            * 4_000
-        )
+        """
+        Get driving time in seconds to another location.
+
+        If a pre-computed matrix is available (via init_driving_time_matrix),
+        uses O(1) lookup. Otherwise, calculates on-demand using Haversine formula.
+        """
+        # Use pre-computed matrix if available
+        key = _get_matrix_key(self, other)
+        if key in _DRIVING_TIME_MATRIX:
+            return _DRIVING_TIME_MATRIX[key]
+
+        # Fall back to on-demand calculation
+        return self._calculate_driving_time_haversine(other)
+
+    def _calculate_driving_time_haversine(self, other: "Location") -> int:
+        """
+        Calculate driving time in seconds using Haversine distance.
+
+        Algorithm:
+        1. Convert lat/long to 3D Cartesian coordinates on a unit sphere
+        2. Calculate Euclidean distance between the two points
+        3. Use the arc sine formula to get the great-circle distance
+        4. Convert meters to driving seconds assuming average speed
+        """
+        if self.latitude == other.latitude and self.longitude == other.longitude:
+            return 0
+
+        from_cartesian = self._to_cartesian()
+        to_cartesian = other._to_cartesian()
+        distance_meters = self._calculate_distance(from_cartesian, to_cartesian)
+        return self._meters_to_driving_seconds(distance_meters)
+
+    def _to_cartesian(self) -> tuple[float, float, float, float]:
+        """Convert latitude/longitude to 3D Cartesian coordinates on a unit sphere."""
+        import math
+        lat_rad = math.radians(self.latitude)
+        lon_rad = math.radians(self.longitude)
+        # Cartesian coordinates, normalized for a sphere of diameter 1.0
+        x = 0.5 * math.cos(lat_rad) * math.sin(lon_rad)
+        y = 0.5 * math.cos(lat_rad) * math.cos(lon_rad)
+        z = 0.5 * math.sin(lat_rad)
+        return (x, y, z)
+
+    def _calculate_distance(self, from_c: tuple[float, float, float, float], to_c: tuple[float, float, float, float]) -> int:
+        """Calculate great-circle distance in meters between two Cartesian points."""
+        import math
+        dx = from_c[0] - to_c[0]
+        dy = from_c[1] - to_c[1]
+        dz = from_c[2] - to_c[2]
+        r = math.sqrt(dx * dx + dy * dy + dz * dz)
+        return round(self._TWICE_EARTH_RADIUS_M * math.asin(r))
+
+    @classmethod
+    def _meters_to_driving_seconds(cls, meters: int) -> int:
+        """Convert distance in meters to driving time in seconds."""
+        # Formula: seconds = meters / (km/h) * 3.6
+        # This is equivalent to: seconds = meters / (speed_m_per_s)
+        # where speed_m_per_s = km/h / 3.6
+        return round(meters / cls._AVERAGE_SPEED_KMPH * 3.6)
 
     def __str__(self):
         return f"[{self.latitude}, {self.longitude}]"
 
     def __repr__(self):
         return f"Location({self.latitude}, {self.longitude})"
+
+
+def init_driving_time_matrix(locations: list[Location]) -> None:
+    """
+    Pre-compute driving times between all location pairs.
+
+    This trades O(n²) memory for O(1) lookup during solving.
+    For n=77 locations (FIRENZE), this is only 5,929 entries.
+
+    Call this once after creating all locations but before solving.
+    The matrix is stored globally and persists across solver runs.
+    """
+    global _DRIVING_TIME_MATRIX
+    _DRIVING_TIME_MATRIX = {}
+    for from_loc in locations:
+        for to_loc in locations:
+            key = _get_matrix_key(from_loc, to_loc)
+            _DRIVING_TIME_MATRIX[key] = from_loc._calculate_driving_time_haversine(to_loc)
+
+
+def clear_driving_time_matrix() -> None:
+    """Clear the pre-computed driving time matrix."""
+    global _DRIVING_TIME_MATRIX
+    _DRIVING_TIME_MATRIX = {}
+
+
+def is_driving_time_matrix_initialized() -> bool:
+    """Check if the driving time matrix has been pre-computed."""
+    return len(_DRIVING_TIME_MATRIX) > 0
 
 
 @planning_entity
@@ -98,8 +220,7 @@ class Visit:
     def service_finished_delay_in_minutes(self) -> int:
         if self.arrival_time is None:
             return 0
-        # Floor division always rounds down, so divide by a negative duration and negate the result
-        # to round up
+        # Round up to next minute using the negative division trick:
         # ex: 30 seconds / -1 minute = -0.5,
         # so 30 seconds // -1 minute = -1,
         # and negating that gives 1
@@ -129,6 +250,7 @@ class Visit:
 @dataclass
 class Vehicle:
     id: Annotated[str, PlanningId]
+    name: str
     capacity: int
     home_location: Location
     departure_time: datetime
@@ -174,10 +296,10 @@ class Vehicle:
         return total_driving_time_seconds
 
     def __str__(self):
-        return self.id
+        return self.name
 
     def __repr__(self):
-        return f"Vehicle({self.id})"
+        return f"Vehicle({self.id}, {self.name})"
 
 
 @planning_solution
@@ -197,6 +319,20 @@ class VehicleRoutePlan:
         for vehicle in self.vehicles:
             out += vehicle.total_driving_time_seconds
         return out
+
+    @property
+    def start_date_time(self) -> Optional[datetime]:
+        """Earliest vehicle departure time - for timeline window."""
+        if not self.vehicles:
+            return None
+        return min(v.departure_time for v in self.vehicles)
+
+    @property
+    def end_date_time(self) -> Optional[datetime]:
+        """Latest vehicle arrival time - for timeline window."""
+        if not self.vehicles:
+            return None
+        return max(v.arrival_time for v in self.vehicles)
 
     def __str__(self):
         return f"VehicleRoutePlan(name={self.name}, vehicles={self.vehicles}, visits={self.visits})"
@@ -222,6 +358,9 @@ class VisitModel(JsonDomainBase):
     arrival_time: Optional[str] = Field(
         None, alias="arrivalTime"
     )  # ISO datetime string
+    start_service_time: Optional[str] = Field(
+        None, alias="startServiceTime"
+    )  # ISO datetime string
     departure_time: Optional[str] = Field(
         None, alias="departureTime"
     )  # ISO datetime string
@@ -232,6 +371,7 @@ class VisitModel(JsonDomainBase):
 
 class VehicleModel(JsonDomainBase):
     id: str
+    name: str
     capacity: int
     home_location: List[float] = Field(..., alias="homeLocation")  # [lat, lng] array
     departure_time: str = Field(..., alias="departureTime")  # ISO datetime string
@@ -256,3 +396,5 @@ class VehicleRoutePlanModel(JsonDomainBase):
     score: Optional[str] = None
     solver_status: Optional[str] = None
     total_driving_time_seconds: int = Field(0, alias="totalDrivingTimeSeconds")
+    start_date_time: Optional[str] = Field(None, alias="startDateTime")
+    end_date_time: Optional[str] = Field(None, alias="endDateTime")

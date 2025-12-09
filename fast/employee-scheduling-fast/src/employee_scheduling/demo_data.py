@@ -5,7 +5,7 @@ from random import Random
 from typing import Generator
 from dataclasses import dataclass, field
 
-from .domain import *
+from .domain import Employee, EmployeeSchedule, Shift
 
 
 class DemoData(Enum):

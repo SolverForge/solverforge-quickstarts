@@ -21,6 +21,9 @@ def visit_to_model(visit: domain.Visit) -> domain.VisitModel:
         previous_visit=visit.previous_visit.id if visit.previous_visit else None,
         next_visit=visit.next_visit.id if visit.next_visit else None,
         arrival_time=visit.arrival_time.isoformat() if visit.arrival_time else None,
+        start_service_time=visit.start_service_time.isoformat()
+        if visit.start_service_time
+        else None,
         departure_time=visit.departure_time.isoformat()
         if visit.departure_time
         else None,
@@ -31,6 +34,7 @@ def visit_to_model(visit: domain.Visit) -> domain.VisitModel:
 def vehicle_to_model(vehicle: domain.Vehicle) -> domain.VehicleModel:
     return domain.VehicleModel(
         id=vehicle.id,
+        name=vehicle.name,
         capacity=vehicle.capacity,
         home_location=location_to_model(vehicle.home_location),
         departure_time=vehicle.departure_time.isoformat(),
@@ -51,6 +55,10 @@ def plan_to_model(plan: domain.VehicleRoutePlan) -> domain.VehicleRoutePlanModel
         score=str(plan.score) if plan.score else None,
         solver_status=plan.solver_status.name if plan.solver_status else None,
         total_driving_time_seconds=plan.total_driving_time_seconds,
+        start_date_time=plan.start_date_time.isoformat()
+        if plan.start_date_time
+        else None,
+        end_date_time=plan.end_date_time.isoformat() if plan.end_date_time else None,
     )
 
 
@@ -153,6 +161,7 @@ def model_to_plan(model: domain.VehicleRoutePlanModel) -> domain.VehicleRoutePla
     for vehicle_model in model.vehicles:
         vehicle = domain.Vehicle(
             id=vehicle_model.id,
+            name=vehicle_model.name,
             capacity=vehicle_model.capacity,
             home_location=model_to_location(vehicle_model.home_location),
             departure_time=datetime.fromisoformat(vehicle_model.departure_time),

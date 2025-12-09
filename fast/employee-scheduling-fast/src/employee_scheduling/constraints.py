@@ -5,7 +5,7 @@ from solverforge_legacy.solver.score import (
     HardSoftDecimalScore,
     ConstraintCollectors,
 )
-from datetime import datetime, date
+from datetime import datetime, date, time
 
 from .domain import Employee, Shift
 
@@ -33,13 +33,12 @@ def overlapping_in_minutes(
 
 
 def get_shift_overlapping_duration_in_minutes(shift: Shift, dt: date) -> int:
-    overlap = 0
     start_date_time = datetime.combine(dt, datetime.min.time())
     end_date_time = datetime.combine(dt, datetime.max.time())
-    overlap += overlapping_in_minutes(
+    overlap = overlapping_in_minutes(
         start_date_time, end_date_time, shift.start, shift.end
     )
-    return overlap
+    return int(overlap)
 
 
 @constraint_provider
@@ -51,6 +50,7 @@ def define_constraints(constraint_factory: ConstraintFactory):
         at_least_10_hours_between_two_shifts(constraint_factory),
         one_shift_per_day(constraint_factory),
         unavailable_employee(constraint_factory),
+        # max_shifts_per_employee(constraint_factory),  # Optional extension - disabled by default
         # Soft constraints
         undesired_day_for_employee(constraint_factory),
         desired_day_for_employee(constraint_factory),
@@ -125,12 +125,35 @@ def unavailable_employee(constraint_factory: ConstraintFactory):
             Joiners.equal(lambda shift: shift.employee, lambda employee: employee),
         )
         .flatten_last(lambda employee: employee.unavailable_dates)
-        .filter(lambda shift, unavailable_date: shift.is_overlapping_with_date(unavailable_date))
+        .filter(lambda shift, unavailable_date: is_overlapping_with_date(shift, unavailable_date))
         .penalize(
             HardSoftDecimalScore.ONE_HARD,
-            lambda shift, unavailable_date: shift.get_overlapping_duration_in_minutes(unavailable_date),
+            lambda shift, unavailable_date: int((min(shift.end, datetime.combine(unavailable_date, time(23, 59, 59))) - max(shift.start, datetime.combine(unavailable_date, time(0, 0, 0)))).total_seconds() / 60),
         )
         .as_constraint("Unavailable employee")
+    )
+
+
+def max_shifts_per_employee(constraint_factory: ConstraintFactory):
+    """
+    Hard constraint: No employee can have more than 12 shifts.
+
+    The limit of 12 is chosen based on the demo data dimensions:
+    - SMALL dataset: 139 shifts / 15 employees = ~9.3 average
+    - This provides headroom while preventing extreme imbalance
+
+    Note: A limit that's too low (e.g., 5) would make the problem infeasible.
+    Always ensure your constraints are compatible with your data dimensions.
+    """
+    return (
+        constraint_factory.for_each(Shift)
+        .group_by(lambda shift: shift.employee, ConstraintCollectors.count())
+        .filter(lambda employee, shift_count: shift_count > 12)
+        .penalize(
+            HardSoftDecimalScore.ONE_HARD,
+            lambda employee, shift_count: shift_count - 12,
+        )
+        .as_constraint("Max 12 shifts per employee")
     )
 
 
@@ -145,7 +168,7 @@ def undesired_day_for_employee(constraint_factory: ConstraintFactory):
         .filter(lambda shift, undesired_date: shift.is_overlapping_with_date(undesired_date))
         .penalize(
             HardSoftDecimalScore.ONE_SOFT,
-            lambda shift, undesired_date: shift.get_overlapping_duration_in_minutes(undesired_date),
+            lambda shift, undesired_date: int((min(shift.end, datetime.combine(undesired_date, time(23, 59, 59))) - max(shift.start, datetime.combine(undesired_date, time(0, 0, 0)))).total_seconds() / 60),
         )
         .as_constraint("Undesired day for employee")
     )
@@ -162,7 +185,7 @@ def desired_day_for_employee(constraint_factory: ConstraintFactory):
         .filter(lambda shift, desired_date: shift.is_overlapping_with_date(desired_date))
         .reward(
             HardSoftDecimalScore.ONE_SOFT,
-            lambda shift, desired_date: shift.get_overlapping_duration_in_minutes(desired_date),
+            lambda shift, desired_date: int((min(shift.end, datetime.combine(desired_date, time(23, 59, 59))) - max(shift.start, datetime.combine(desired_date, time(0, 0, 0)))).total_seconds() / 60),
         )
         .as_constraint("Desired day for employee")
     )
