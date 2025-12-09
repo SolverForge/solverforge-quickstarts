@@ -4,7 +4,7 @@ from enum import Enum
 from random import Random
 from dataclasses import dataclass
 
-from .domain import Location, Vehicle, VehicleRoutePlan, Visit, init_driving_time_matrix, clear_driving_time_matrix
+from .domain import Location, Vehicle, VehicleRoutePlan, Visit
 
 
 FIRST_NAMES = ("Amy", "Beth", "Carl", "Dan", "Elsa", "Flo", "Gus", "Hugo", "Ivy", "Jay")
@@ -138,7 +138,7 @@ def generate_names(random: Random) -> Generator[str, None, None]:
         yield f'{random.choice(FIRST_NAMES)} {random.choice(LAST_NAMES)}'
 
 
-def generate_demo_data(demo_data_enum: DemoData, use_precomputed_matrix: bool = False) -> VehicleRoutePlan:
+def generate_demo_data(demo_data_enum: DemoData) -> VehicleRoutePlan:
     """
     Generate demo data for vehicle routing.
 
@@ -149,9 +149,6 @@ def generate_demo_data(demo_data_enum: DemoData, use_precomputed_matrix: bool = 
 
     Args:
         demo_data_enum: The demo data configuration to use
-        use_precomputed_matrix: If True, pre-compute driving time matrix for O(1) lookups.
-                               If False (default), calculate distances on-demand.
-                               Pre-computed is faster during solving but uses O(n²) memory.
     """
     name = "demo"
     demo_data = demo_data_enum.value
@@ -191,15 +188,6 @@ def generate_demo_data(demo_data_enum: DemoData, use_precomputed_matrix: bool = 
                 service_duration=timedelta(minutes=service_minutes),
             )
         )
-
-    # Handle driving time calculation mode
-    if use_precomputed_matrix:
-        # Pre-compute driving time matrix for faster solving
-        all_locations = [v.home_location for v in vehicles] + [v.location for v in visits]
-        init_driving_time_matrix(all_locations)
-    else:
-        # Clear any existing pre-computed matrix to ensure on-demand calculation
-        clear_driving_time_matrix()
 
     return VehicleRoutePlan(name=name,
                             south_west_corner=demo_data.south_west_corner,

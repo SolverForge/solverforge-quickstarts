@@ -68,20 +68,16 @@ async def get_demo_data():
     return [demo.name for demo in DemoData]
 
 @app.get("/demo-data/{demo_name}", response_model=VehicleRoutePlanModel)
-async def get_demo_data_by_name(demo_name: str, distanceMode: str = "ON_DEMAND") -> VehicleRoutePlanModel:
+async def get_demo_data_by_name(demo_name: str) -> VehicleRoutePlanModel:
     """
     Get a specific demo data set.
 
     Args:
         demo_name: Name of the demo dataset (PHILADELPHIA, HARTFORT, FIRENZE)
-        distanceMode: Distance calculation mode:
-            - ON_DEMAND: Calculate distances using Haversine formula on each call (default)
-            - PRECOMPUTED: Pre-compute distance matrix for O(1) lookups (faster solving)
     """
     try:
         demo_data = DemoData[demo_name]
-        use_precomputed = distanceMode == "PRECOMPUTED"
-        domain_plan = generate_demo_data(demo_data, use_precomputed_matrix=use_precomputed)
+        domain_plan = generate_demo_data(demo_data)
         return plan_to_model(domain_plan)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Demo data '{demo_name}' not found")

@@ -4,12 +4,7 @@ Unit tests for the Haversine driving time calculator in Location class.
 These tests verify that the driving time calculations correctly implement
 the Haversine formula for great-circle distance on Earth.
 """
-from vehicle_routing.domain import (
-    Location,
-    init_driving_time_matrix,
-    clear_driving_time_matrix,
-    is_driving_time_matrix_initialized,
-)
+from vehicle_routing.domain import Location
 
 
 class TestHaversineDrivingTime:
@@ -159,97 +154,3 @@ class TestHaversineInternalMethods:
         assert seconds == 72
 
 
-class TestPrecomputedMatrix:
-    """Tests for the pre-computed driving time matrix functionality."""
-
-    def setup_method(self):
-        """Clear matrix before each test."""
-        clear_driving_time_matrix()
-
-    def teardown_method(self):
-        """Clear matrix after each test."""
-        clear_driving_time_matrix()
-
-    def test_matrix_initially_empty(self):
-        """Matrix should be empty on startup."""
-        clear_driving_time_matrix()
-        assert not is_driving_time_matrix_initialized()
-
-    def test_init_matrix_marks_as_initialized(self):
-        """Initializing matrix should mark it as initialized."""
-        locations = [
-            Location(latitude=0, longitude=0),
-            Location(latitude=1, longitude=1),
-        ]
-        init_driving_time_matrix(locations)
-        assert is_driving_time_matrix_initialized()
-
-    def test_clear_matrix_marks_as_not_initialized(self):
-        """Clearing matrix should mark it as not initialized."""
-        locations = [
-            Location(latitude=0, longitude=0),
-            Location(latitude=1, longitude=1),
-        ]
-        init_driving_time_matrix(locations)
-        clear_driving_time_matrix()
-        assert not is_driving_time_matrix_initialized()
-
-    def test_precomputed_returns_same_as_on_demand(self):
-        """Pre-computed values should match on-demand calculations."""
-        loc1 = Location(latitude=39.95, longitude=-75.17)
-        loc2 = Location(latitude=40.71, longitude=-74.01)
-        loc3 = Location(latitude=41.76, longitude=-72.68)
-
-        # Calculate on-demand first
-        on_demand_1_2 = loc1.driving_time_to(loc2)
-        on_demand_2_3 = loc2.driving_time_to(loc3)
-        on_demand_1_3 = loc1.driving_time_to(loc3)
-
-        # Initialize matrix
-        init_driving_time_matrix([loc1, loc2, loc3])
-
-        # Calculate with matrix
-        precomputed_1_2 = loc1.driving_time_to(loc2)
-        precomputed_2_3 = loc2.driving_time_to(loc3)
-        precomputed_1_3 = loc1.driving_time_to(loc3)
-
-        # Should be identical
-        assert precomputed_1_2 == on_demand_1_2
-        assert precomputed_2_3 == on_demand_2_3
-        assert precomputed_1_3 == on_demand_1_3
-
-    def test_fallback_to_on_demand_for_unknown_location(self):
-        """Locations not in matrix should calculate on-demand."""
-        loc1 = Location(latitude=0, longitude=0)
-        loc2 = Location(latitude=1, longitude=1)
-        loc3 = Location(latitude=2, longitude=2)  # Not in matrix
-
-        # Initialize matrix with only loc1 and loc2
-        init_driving_time_matrix([loc1, loc2])
-
-        # loc3 is not in matrix, should fall back to on-demand
-        driving_time = loc1.driving_time_to(loc3)
-
-        # Should still calculate correctly (on-demand)
-        expected = loc1._calculate_driving_time_haversine(loc3)
-        assert driving_time == expected
-
-    def test_matrix_size_is_n_squared(self):
-        """Matrix should contain n² entries for n locations."""
-        import vehicle_routing.domain as domain_module
-
-        locations = [
-            Location(latitude=0, longitude=0),
-            Location(latitude=1, longitude=1),
-            Location(latitude=2, longitude=2),
-        ]
-        init_driving_time_matrix(locations)
-
-        # 3 locations = 9 entries (including self-to-self)
-        assert len(domain_module._DRIVING_TIME_MATRIX) == 9
-
-    def test_self_to_self_is_zero(self):
-        """Matrix should have 0 for same location."""
-        loc = Location(latitude=40.0, longitude=-75.0)
-        init_driving_time_matrix([loc])
-        assert loc.driving_time_to(loc) == 0

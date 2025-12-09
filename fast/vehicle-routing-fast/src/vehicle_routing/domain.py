@@ -21,31 +21,12 @@ from .json_serialization import JsonDomainBase
 from pydantic import Field
 
 
-# Global driving time matrix for pre-computed mode
-# Key: (from_lat, from_lng, to_lat, to_lng) -> driving_time_seconds
-# This is kept outside the Location class to avoid transpiler issues with mutable fields
-_DRIVING_TIME_MATRIX: dict[tuple[float, float, float, float], int] = {}
-
-
-def _get_matrix_key(from_loc: "Location", to_loc: "Location") -> tuple[float, float, float, float]:
-    """Create a hashable key for the driving time matrix lookup."""
-    return (from_loc.latitude, from_loc.longitude, to_loc.latitude, to_loc.longitude)
-
-
 @dataclass
 class Location:
     """
     Represents a geographic location with latitude and longitude.
 
-    Driving times can be calculated in two modes:
-    1. On-demand (default): Uses Haversine formula for each calculation
-    2. Pre-computed matrix: O(1) lookup from global pre-calculated distance matrix
-
-    The pre-computed mode is faster during solving (millions of lookups)
-    but requires O(n²) memory and one-time initialization cost.
-
-    To enable pre-computed mode, call init_driving_time_matrix() with all locations
-    before solving.
+    Driving times are calculated using the Haversine formula for great-circle distance.
     """
     latitude: float
     longitude: float
@@ -58,17 +39,8 @@ class Location:
 
     def driving_time_to(self, other: "Location") -> int:
         """
-        Get driving time in seconds to another location.
-
-        If a pre-computed matrix is available (via init_driving_time_matrix),
-        uses O(1) lookup. Otherwise, calculates on-demand using Haversine formula.
+        Get driving time in seconds to another location using Haversine formula.
         """
-        # Use pre-computed matrix if available
-        key = _get_matrix_key(self, other)
-        if key in _DRIVING_TIME_MATRIX:
-            return _DRIVING_TIME_MATRIX[key]
-
-        # Fall back to on-demand calculation
         return self._calculate_driving_time_haversine(other)
 
     def _calculate_driving_time_haversine(self, other: "Location") -> int:
@@ -122,35 +94,6 @@ class Location:
 
     def __repr__(self):
         return f"Location({self.latitude}, {self.longitude})"
-
-
-def init_driving_time_matrix(locations: list[Location]) -> None:
-    """
-    Pre-compute driving times between all location pairs.
-
-    This trades O(n²) memory for O(1) lookup during solving.
-    For n=77 locations (FIRENZE), this is only 5,929 entries.
-
-    Call this once after creating all locations but before solving.
-    The matrix is stored globally and persists across solver runs.
-    """
-    global _DRIVING_TIME_MATRIX
-    _DRIVING_TIME_MATRIX = {}
-    for from_loc in locations:
-        for to_loc in locations:
-            key = _get_matrix_key(from_loc, to_loc)
-            _DRIVING_TIME_MATRIX[key] = from_loc._calculate_driving_time_haversine(to_loc)
-
-
-def clear_driving_time_matrix() -> None:
-    """Clear the pre-computed driving time matrix."""
-    global _DRIVING_TIME_MATRIX
-    _DRIVING_TIME_MATRIX = {}
-
-
-def is_driving_time_matrix_initialized() -> bool:
-    """Check if the driving time matrix has been pre-computed."""
-    return len(_DRIVING_TIME_MATRIX) > 0
 
 
 @planning_entity
