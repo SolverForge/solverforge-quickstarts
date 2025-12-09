@@ -1,6 +1,6 @@
 import uvicorn
 
-from .rest_api import app
+from .rest_api import app as app
 
 
 def main():

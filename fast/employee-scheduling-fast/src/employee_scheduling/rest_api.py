@@ -1,7 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from uuid import uuid4
 from dataclasses import replace
+from typing import Dict, List
 
 from .domain import EmployeeSchedule, EmployeeScheduleModel
 from .converters import (
@@ -9,6 +10,7 @@ from .converters import (
 )
 from .demo_data import DemoData, generate_demo_data
 from .solver import solver_manager, solution_manager
+from .score_analysis import ConstraintAnalysisDTO, MatchAnalysisDTO
 
 app = FastAPI(docs_url='/q/swagger-ui')
 data_sets: dict[str, EmployeeSchedule] = {}
@@ -48,9 +50,78 @@ async def solve_timetable(schedule_model: EmployeeScheduleModel) -> str:
     return job_id
 
 
+@app.get("/schedules")
+async def list_schedules() -> List[str]:
+    """List all job IDs of submitted schedules."""
+    return list(data_sets.keys())
+
+
+@app.get("/schedules/{problem_id}/status")
+async def get_status(problem_id: str) -> Dict:
+    """Get the schedule status and score for a given job ID."""
+    if problem_id not in data_sets:
+        raise ValueError(f"No schedule found with ID {problem_id}")
+
+    schedule = data_sets[problem_id]
+    solver_status = solver_manager.get_solver_status(problem_id)
+
+    return {
+        "score": {
+            "hardScore": schedule.score.hard_score if schedule.score else 0,
+            "softScore": schedule.score.soft_score if schedule.score else 0,
+        },
+        "solverStatus": solver_status.name,
+    }
+
+
 @app.delete("/schedules/{problem_id}")
-async def stop_solving(problem_id: str) -> None:
-    solver_manager.terminate_early(problem_id)
+async def stop_solving(problem_id: str) -> EmployeeScheduleModel:
+    """Terminate solving for a given job ID."""
+    if problem_id not in data_sets:
+        raise ValueError(f"No schedule found with ID {problem_id}")
+
+    try:
+        solver_manager.terminate_early(problem_id)
+    except Exception as e:
+        print(f"Warning: terminate_early failed for {problem_id}: {e}")
+
+    return await get_timetable(problem_id)
+
+
+@app.put("/schedules/analyze")
+async def analyze_schedule(request: Request) -> Dict:
+    """Submit a schedule to analyze its score."""
+    json_data = await request.json()
+
+    # Parse the incoming JSON using Pydantic models
+    schedule_model = EmployeeScheduleModel.model_validate(json_data)
+
+    # Convert to domain model for analysis
+    domain_schedule = model_to_schedule(schedule_model)
+
+    analysis = solution_manager.analyze(domain_schedule)
+
+    # Convert to proper DTOs for correct serialization
+    constraints = []
+    for constraint in analysis.constraint_analyses:
+        matches = [
+            MatchAnalysisDTO(
+                name=match.constraint_ref.constraint_name,
+                score=match.score,
+                justification=match.justification,
+            )
+            for match in constraint.matches
+        ]
+
+        constraint_dto = ConstraintAnalysisDTO(
+            name=constraint.constraint_name,
+            weight=constraint.weight,
+            score=constraint.score,
+            matches=matches,
+        )
+        constraints.append(constraint_dto)
+
+    return {"constraints": [constraint.model_dump() for constraint in constraints]}
 
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

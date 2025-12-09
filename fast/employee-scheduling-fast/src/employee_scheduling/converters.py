@@ -1,8 +1,5 @@
-from typing import List, Optional, Union
 from datetime import datetime, date
 from . import domain
-from .json_serialization import JsonDomainBase
-from pydantic import Field
 
 
 # Conversion functions from domain to API models
