@@ -14,6 +14,24 @@
         .vis-time-axis .vis-grid.vis-sunday {
             background: #D3D7CFFF;
         }
+
+        /* Solving spinner */
+        #solvingSpinner {
+            display: none;
+            width: 1.25rem;
+            height: 1.25rem;
+            border: 2px solid #10b981;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.75s linear infinite;
+            vertical-align: middle;
+        }
+        #solvingSpinner.active {
+            display: inline-block;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
     <link rel="icon" href="/webjars/solverforge/img/solverforge-favicon.svg" type="image/svg+xml">
 </head>
@@ -38,8 +56,12 @@
             <button id="stopSolvingButton" type="button" class="btn btn-danger">
                 <span class="fas fa-stop"></span> Stop solving
             </button>
+            <span id="solvingSpinner" class="ms-2"></span>
             <span id="unassignedShifts" class="ms-2 align-middle fw-bold"></span>
             <span id="score" class="score ms-2 align-middle fw-bold">Score: ?</span>
+            <button id="analyzeButton" type="button" class="ms-2 btn btn-secondary">
+                <span class="fas fa-question"></span>
+            </button>
 
             <div class="float-end">
                 <ul class="nav nav-pills" role="tablist">
@@ -119,6 +141,24 @@
         </div>
     </div>
 </div>
+
+<div class="modal fadebd-example-modal-lg" id="scoreAnalysisModal" tabindex="-1" aria-labelledby="scoreAnalysisModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="scoreAnalysisModalLabel">Score analysis <span id="scoreAnalysisScoreLabel"></span></h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="scoreAnalysisModalContent">
+                <!-- Filled in by app.js -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <footer id="solverforge-auto-footer"></footer>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/2.11.8/umd/popper.min.js"></script>

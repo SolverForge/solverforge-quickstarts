@@ -124,3 +124,41 @@ def test_solver_assigns_employees():
     assert len(assigned_shifts) > 0, "Solver should assign some employees to shifts"
 
     client.delete(f"/schedules/{job_id}")
+
+
+def test_score_analysis():
+    """Test that score analysis endpoint returns constraint analysis."""
+    demo_data_response = client.get("/demo-data/SMALL")
+    assert demo_data_response.status_code == 200
+
+    # Start solving and get a scored solution
+    job_id_response = client.post("/schedules", json=demo_data_response.json())
+    assert job_id_response.status_code == 200
+    job_id = job_id_response.text[1:-1]
+
+    # Wait for solver to produce a score
+    sleep(2)
+
+    schedule_response = client.get(f"/schedules/{job_id}")
+    schedule_json = schedule_response.json()
+
+    # Stop solving
+    client.delete(f"/schedules/{job_id}")
+
+    # Call analyze endpoint
+    analyze_response = client.put("/schedules/analyze", json=schedule_json)
+    assert analyze_response.status_code == 200
+    analysis = analyze_response.json()
+
+    # Verify structure
+    assert "constraints" in analysis
+    assert isinstance(analysis["constraints"], list)
+    assert len(analysis["constraints"]) > 0
+
+    # Check constraint structure
+    for constraint in analysis["constraints"]:
+        assert "name" in constraint
+        assert "weight" in constraint
+        assert "score" in constraint
+        assert "matches" in constraint
+        assert isinstance(constraint["matches"], list)

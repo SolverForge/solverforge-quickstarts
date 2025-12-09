@@ -102,21 +102,22 @@ async def analyze_schedule(request: Request) -> Dict:
     analysis = solution_manager.analyze(domain_schedule)
 
     # Convert to proper DTOs for correct serialization
+    # Use str() for scores and justification to avoid Java object serialization issues
     constraints = []
-    for constraint in analysis.constraint_analyses:
+    for constraint in getattr(analysis, 'constraint_analyses', []) or []:
         matches = [
             MatchAnalysisDTO(
-                name=match.constraint_ref.constraint_name,
-                score=match.score,
-                justification=match.justification,
+                name=str(getattr(getattr(match, 'constraint_ref', None), 'constraint_name', "")),
+                score=str(getattr(match, 'score', "0hard/0soft")),
+                justification=str(getattr(match, 'justification', "")),
             )
-            for match in constraint.matches
+            for match in getattr(constraint, 'matches', []) or []
         ]
 
         constraint_dto = ConstraintAnalysisDTO(
-            name=constraint.constraint_name,
-            weight=constraint.weight,
-            score=constraint.score,
+            name=str(getattr(constraint, 'constraint_name', "")),
+            weight=str(getattr(constraint, 'weight', "0hard/0soft")),
+            score=str(getattr(constraint, 'score', "0hard/0soft")),
             matches=matches,
         )
         constraints.append(constraint_dto)
