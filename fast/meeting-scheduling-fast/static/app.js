@@ -242,18 +242,21 @@ function extractAssignmentIds(justification, schedule) {
     const ids = new Set();
     if (!justification?.facts) return [...ids];
 
-    for (const fact of justification.facts) {
-        if (!fact?.id) continue;
+    // Build meeting-to-assignment lookup
+    const meetingToAssignment = new Map();
+    if (schedule?.meetingAssignments) {
+        for (const a of schedule.meetingAssignments) {
+            const meetingId = typeof a.meeting === 'object' ? a.meeting.id : a.meeting;
+            meetingToAssignment.set(meetingId, a.id);
+        }
+    }
 
-        if (fact.type === 'assignment' || fact.meeting !== undefined) {
-            // Direct assignment fact
+    for (const fact of justification.facts) {
+        if (fact.type === 'assignment' && fact.id) {
             ids.add(fact.id);
         } else if (fact.type === 'attendance' && fact.meetingId) {
-            // Attendance fact - find the assignment for this meeting
-            const assignment = schedule?.meetingAssignments?.find(
-                a => (a.meeting?.id ?? a.meeting) === fact.meetingId
-            );
-            if (assignment) ids.add(assignment.id);
+            const assignmentId = meetingToAssignment.get(fact.meetingId);
+            if (assignmentId) ids.add(assignmentId);
         }
     }
     return [...ids];
