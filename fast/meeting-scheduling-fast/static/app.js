@@ -197,7 +197,7 @@ function fetchConstraintAnalysis(schedule) {
                 const type = getConstraintType(constraint.weight);
 
                 for (const match of constraint.matches) {
-                    const assignmentIds = extractAssignmentIds(match.justification);
+                    const assignmentIds = extractAssignmentIds(match.justification, loadedSchedule);
 
                     for (const id of assignmentIds) {
                         if (!analyzeCache.has(id)) {
@@ -238,21 +238,25 @@ function getConstraintType(weight) {
 }
 
 
-function extractAssignmentIds(justification) {
-    const ids = [];
-    if (justification && justification.facts) {
-        for (const fact of justification.facts) {
-            // Include facts that have an id and either:
-            // - have a meeting property (MeetingAssignment objects)
-            // - have meeting set to a value (serialized MeetingAssignment with meeting id)
-            if (fact && fact.id != null) {
-                if (fact.meeting !== undefined) {
-                    ids.push(fact.id);
-                }
-            }
+function extractAssignmentIds(justification, schedule) {
+    const ids = new Set();
+    if (!justification?.facts) return [...ids];
+
+    for (const fact of justification.facts) {
+        if (!fact?.id) continue;
+
+        if (fact.type === 'assignment' || fact.meeting !== undefined) {
+            // Direct assignment fact
+            ids.add(fact.id);
+        } else if (fact.type === 'attendance' && fact.meetingId) {
+            // Attendance fact - find the assignment for this meeting
+            const assignment = schedule?.meetingAssignments?.find(
+                a => (a.meeting?.id ?? a.meeting) === fact.meetingId
+            );
+            if (assignment) ids.add(assignment.id);
         }
     }
-    return ids;
+    return [...ids];
 }
 
 
