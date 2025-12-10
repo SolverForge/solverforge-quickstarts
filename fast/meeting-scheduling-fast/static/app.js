@@ -242,162 +242,17 @@ function extractAssignmentIds(justification) {
     const ids = [];
     if (justification && justification.facts) {
         for (const fact of justification.facts) {
-            // Only include facts that look like MeetingAssignments (have meeting property)
-            if (fact && fact.id && fact.meeting) {
-                ids.push(fact.id);
+            // Include facts that have an id and either:
+            // - have a meeting property (MeetingAssignment objects)
+            // - have meeting set to a value (serialized MeetingAssignment with meeting id)
+            if (fact && fact.id != null) {
+                if (fact.meeting !== undefined) {
+                    ids.push(fact.id);
+                }
             }
         }
     }
     return ids;
-}
-
-
-function analyzeConflicts(schedule) {
-    const conflicts = {
-        roomConflicts: new Map(),      // assignmentId -> array of conflicting assignment ids (HARD)
-        attendanceConflicts: new Map(), // assignmentId -> array of conflicting person ids (HARD: req vs req)
-        capacityViolations: new Set(),  // assignment ids with capacity violations (HARD)
-        // Medium constraints
-        preferredAttendanceConflicts: new Map(), // assignmentId -> person ids (MEDIUM: req vs pref, pref vs pref)
-        // Soft constraints
-        noBreakBetweenMeetings: new Set(),  // assignment ids with no break before/after
-        roomStabilityViolations: new Set(),  // assignment ids where attendee switches rooms
-    };
-
-    if (!schedule.meetingAssignments || !schedule.meetings || !schedule.rooms) {
-        return conflicts;
-    }
-
-    const meetingMap = new Map();
-    schedule.meetings.forEach(m => meetingMap.set(m.id, m));
-
-    const roomMap = new Map();
-    schedule.rooms.forEach(r => roomMap.set(r.id, r));
-
-    // Build assignment lookup for overlap checking
-    const assignedMeetings = schedule.meetingAssignments.filter(a =>
-        a.room != null && a.startingTimeGrain != null
-    );
-
-    // Check each pair of assignments for conflicts
-    for (let i = 0; i < assignedMeetings.length; i++) {
-        const a1 = assignedMeetings[i];
-        const m1 = typeof a1.meeting === 'string' ? meetingMap.get(a1.meeting) : a1.meeting;
-        const r1 = typeof a1.room === 'string' ? roomMap.get(a1.room) : a1.room;
-        const tg1 = typeof a1.startingTimeGrain === 'string' ?
-            schedule.timeGrains.find(t => t.id === a1.startingTimeGrain) : a1.startingTimeGrain;
-
-        if (!m1 || !r1 || !tg1) continue;
-
-        // Check room capacity violation
-        const totalAttendees = (m1.requiredAttendances?.length || 0) + (m1.preferredAttendances?.length || 0);
-        if (totalAttendees > r1.capacity) {
-            conflicts.capacityViolations.add(a1.id);
-        }
-
-        for (let j = i + 1; j < assignedMeetings.length; j++) {
-            const a2 = assignedMeetings[j];
-            const m2 = typeof a2.meeting === 'string' ? meetingMap.get(a2.meeting) : a2.meeting;
-            const r2 = typeof a2.room === 'string' ? roomMap.get(a2.room) : a2.room;
-            const tg2 = typeof a2.startingTimeGrain === 'string' ?
-                schedule.timeGrains.find(t => t.id === a2.startingTimeGrain) : a2.startingTimeGrain;
-
-            if (!m2 || !r2 || !tg2) continue;
-
-            // Check time overlap - must be on the same day and share time grains
-            const start1 = tg1.grainIndex ?? tg1.grain_index;
-            const end1 = start1 + (m1.durationInGrains ?? m1.duration_in_grains);
-            const start2 = tg2.grainIndex ?? tg2.grain_index;
-            const end2 = start2 + (m2.durationInGrains ?? m2.duration_in_grains);
-
-            // Meetings only overlap if on same day AND share time grains (exclusive end)
-            const sameDay = (tg1.dayOfYear ?? tg1.day_of_year) === (tg2.dayOfYear ?? tg2.day_of_year);
-            const hasOverlap = sameDay && start1 < end2 && start2 < end1;
-
-            const getPersonId = (a) => {
-                if (!a || !a.person) return null;
-                return typeof a.person === 'string' ? a.person : a.person.id;
-            };
-            const required1 = new Set((m1.requiredAttendances || []).map(getPersonId).filter(id => id != null));
-            const required2 = new Set((m2.requiredAttendances || []).map(getPersonId).filter(id => id != null));
-            const preferred1 = new Set((m1.preferredAttendances || []).map(getPersonId).filter(id => id != null));
-            const preferred2 = new Set((m2.preferredAttendances || []).map(getPersonId).filter(id => id != null));
-
-            if (hasOverlap) {
-                // HARD: Room conflict - same room, overlapping time
-                if (r1.id === r2.id) {
-                    if (!conflicts.roomConflicts.has(a1.id)) conflicts.roomConflicts.set(a1.id, []);
-                    if (!conflicts.roomConflicts.has(a2.id)) conflicts.roomConflicts.set(a2.id, []);
-                    conflicts.roomConflicts.get(a1.id).push(a2.id);
-                    conflicts.roomConflicts.get(a2.id).push(a1.id);
-                }
-
-                // HARD: Required vs Required attendance conflict
-                for (const personId of required1) {
-                    if (required2.has(personId)) {
-                        if (!conflicts.attendanceConflicts.has(a1.id)) conflicts.attendanceConflicts.set(a1.id, []);
-                        if (!conflicts.attendanceConflicts.has(a2.id)) conflicts.attendanceConflicts.set(a2.id, []);
-                        conflicts.attendanceConflicts.get(a1.id).push(personId);
-                        conflicts.attendanceConflicts.get(a2.id).push(personId);
-                    }
-                }
-
-                // MEDIUM: Required vs Preferred attendance conflict
-                for (const personId of required1) {
-                    if (preferred2.has(personId)) {
-                        if (!conflicts.preferredAttendanceConflicts.has(a1.id)) conflicts.preferredAttendanceConflicts.set(a1.id, []);
-                        if (!conflicts.preferredAttendanceConflicts.has(a2.id)) conflicts.preferredAttendanceConflicts.set(a2.id, []);
-                        conflicts.preferredAttendanceConflicts.get(a1.id).push(personId);
-                        conflicts.preferredAttendanceConflicts.get(a2.id).push(personId);
-                    }
-                }
-                for (const personId of required2) {
-                    if (preferred1.has(personId)) {
-                        if (!conflicts.preferredAttendanceConflicts.has(a1.id)) conflicts.preferredAttendanceConflicts.set(a1.id, []);
-                        if (!conflicts.preferredAttendanceConflicts.has(a2.id)) conflicts.preferredAttendanceConflicts.set(a2.id, []);
-                        conflicts.preferredAttendanceConflicts.get(a1.id).push(personId);
-                        conflicts.preferredAttendanceConflicts.get(a2.id).push(personId);
-                    }
-                }
-
-                // MEDIUM: Preferred vs Preferred attendance conflict
-                for (const personId of preferred1) {
-                    if (preferred2.has(personId)) {
-                        if (!conflicts.preferredAttendanceConflicts.has(a1.id)) conflicts.preferredAttendanceConflicts.set(a1.id, []);
-                        if (!conflicts.preferredAttendanceConflicts.has(a2.id)) conflicts.preferredAttendanceConflicts.set(a2.id, []);
-                        conflicts.preferredAttendanceConflicts.get(a1.id).push(personId);
-                        conflicts.preferredAttendanceConflicts.get(a2.id).push(personId);
-                    }
-                }
-            }
-
-            // SOFT: No break between consecutive meetings (end1 == start2 or end2 == start1)
-            if (sameDay) {
-                if (end1 === start2 || end2 === start1) {
-                    conflicts.noBreakBetweenMeetings.add(a1.id);
-                    conflicts.noBreakBetweenMeetings.add(a2.id);
-                }
-            }
-
-            // SOFT: Room stability - same person in different rooms within 2 grains
-            if (r1.id !== r2.id) {
-                const allAttendees1 = new Set([...required1, ...preferred1]);
-                const allAttendees2 = new Set([...required2, ...preferred2]);
-                for (const personId of allAttendees1) {
-                    if (allAttendees2.has(personId)) {
-                        // Check if meetings are close (within 2 grains gap)
-                        const gap = Math.max(start1, start2) - Math.min(end1, end2);
-                        if (gap <= 2 && gap >= 0) {
-                            conflicts.roomStabilityViolations.add(a1.id);
-                            conflicts.roomStabilityViolations.add(a2.id);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    return conflicts;
 }
 
 
