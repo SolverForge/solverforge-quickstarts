@@ -237,16 +237,16 @@ class TestHaversineIntegration:
     """Tests verifying Haversine distance is used correctly in demo data."""
 
     def test_philadelphia_diagonal_realistic(self):
-        """Philadelphia area diagonal should be ~150km with Haversine."""
+        """Philadelphia area diagonal should be ~15km with Haversine (tightened bbox)."""
         props = DemoData.PHILADELPHIA.value
         diagonal_seconds = props.south_west_corner.driving_time_to(
             props.north_east_corner
         )
         diagonal_km = (diagonal_seconds / 3600) * 50  # 50 km/h average
 
-        # Philadelphia area is roughly 100km x 170km
-        # Diagonal should be around 150-200km
-        assert 100 < diagonal_km < 250, f"Diagonal {diagonal_km}km seems wrong"
+        # Philadelphia bbox is tightened to Center City area (~8km x 12km)
+        # Diagonal should be around 10-20km
+        assert 8 < diagonal_km < 25, f"Diagonal {diagonal_km}km seems wrong"
 
     def test_firenze_diagonal_realistic(self):
         """Firenze area diagonal should be ~10km with Haversine."""

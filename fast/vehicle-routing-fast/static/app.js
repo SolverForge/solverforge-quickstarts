@@ -6,10 +6,154 @@ let scheduleId = null;
 let loadedRoutePlan = null;
 let newVisit = null;
 let visitMarker = null;
+let routeGeometries = null;  // Cache for encoded polyline geometries
+let useRealRoads = false;    // Routing mode toggle state
 const solveButton = $("#solveButton");
 const stopSolvingButton = $("#stopSolvingButton");
 const vehiclesTable = $("#vehicles");
 const analyzeButton = $("#analyzeButton");
+
+/**
+ * Decode an encoded polyline string into an array of [lat, lng] coordinates.
+ * This is the Google polyline encoding algorithm.
+ * @param {string} encoded - The encoded polyline string
+ * @returns {Array<Array<number>>} Array of [lat, lng] coordinate pairs
+ */
+function decodePolyline(encoded) {
+  if (!encoded) return [];
+
+  const points = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+
+  while (index < encoded.length) {
+    // Decode latitude
+    let shift = 0;
+    let result = 0;
+    let byte;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+    const dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
+    lat += dlat;
+
+    // Decode longitude
+    shift = 0;
+    result = 0;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+    const dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
+    lng += dlng;
+
+    // Polyline encoding uses precision of 5 decimal places
+    points.push([lat / 1e5, lng / 1e5]);
+  }
+
+  return points;
+}
+
+/**
+ * Fetch route geometries for the current schedule from the backend.
+ * @returns {Promise<Object|null>} The geometries object or null if unavailable
+ */
+async function fetchRouteGeometries() {
+  if (!scheduleId) return null;
+
+  try {
+    const response = await fetch(`/route-plans/${scheduleId}/geometry`);
+    if (response.ok) {
+      const data = await response.json();
+      return data.geometries || null;
+    }
+  } catch (e) {
+    console.warn('Could not fetch route geometries:', e);
+  }
+  return null;
+}
+
+/*************************************** Loading Overlay Functions **************************************/
+
+function showLoadingOverlay(title = "Loading Demo Data", message = "Initializing...") {
+  $("#loadingTitle").text(title);
+  $("#loadingMessage").text(message);
+  $("#loadingProgress").css("width", "0%");
+  $("#loadingDetail").text("");
+  $("#loadingOverlay").removeClass("hidden");
+}
+
+function hideLoadingOverlay() {
+  $("#loadingOverlay").addClass("hidden");
+}
+
+function updateLoadingProgress(message, percent, detail = "") {
+  $("#loadingMessage").text(message);
+  $("#loadingProgress").css("width", `${percent}%`);
+  $("#loadingDetail").text(detail);
+}
+
+/**
+ * Load demo data with progress updates via Server-Sent Events.
+ * Used when Real Roads mode is enabled.
+ */
+function loadDemoDataWithProgress(demoId) {
+  return new Promise((resolve, reject) => {
+    const routingMode = useRealRoads ? "real_roads" : "haversine";
+    const url = `/demo-data/${demoId}/stream?routing=${routingMode}`;
+
+    showLoadingOverlay(
+      useRealRoads ? "Loading Real Road Data" : "Loading Demo Data",
+      "Connecting..."
+    );
+
+    const eventSource = new EventSource(url);
+    let solution = null;
+
+    eventSource.onmessage = function(event) {
+      try {
+        const data = JSON.parse(event.data);
+
+        if (data.event === "progress") {
+          let statusIcon = "";
+          if (data.phase === "network") {
+            statusIcon = '<i class="fas fa-download me-2"></i>';
+          } else if (data.phase === "routes") {
+            statusIcon = '<i class="fas fa-route me-2"></i>';
+          } else if (data.phase === "complete") {
+            statusIcon = '<i class="fas fa-check-circle me-2 text-success"></i>';
+          }
+          updateLoadingProgress(data.message, data.percent, data.detail || "");
+        } else if (data.event === "complete") {
+          solution = data.solution;
+          // Store geometries from the response if available
+          if (data.geometries) {
+            routeGeometries = data.geometries;
+          }
+          eventSource.close();
+          hideLoadingOverlay();
+          resolve(solution);
+        } else if (data.event === "error") {
+          eventSource.close();
+          hideLoadingOverlay();
+          reject(new Error(data.message));
+        }
+      } catch (e) {
+        console.error("Error parsing SSE event:", e);
+      }
+    };
+
+    eventSource.onerror = function(error) {
+      eventSource.close();
+      hideLoadingOverlay();
+      reject(new Error("Connection lost while loading data"));
+    };
+  });
+}
 
 /*************************************** Map constants and variable definitions  **************************************/
 
@@ -155,6 +299,23 @@ $(document).ready(function () {
     }
   });
 
+  // Real Roads toggle handler
+  $(document).on('change', '#realRoadRouting', function() {
+    useRealRoads = $(this).is(':checked');
+
+    // If we have a demo dataset loaded, reload it with the new routing mode
+    if (demoDataId && !optimizing) {
+      scheduleId = null;
+      initialized = false;
+      homeLocationGroup.clearLayers();
+      homeLocationMarkerByIdMap.clear();
+      visitGroup.clearLayers();
+      visitMarkerByIdMap.clear();
+      routeGeometries = null;
+      refreshRoutePlan();
+    }
+  });
+
   setupAjax();
   fetchDemoData();
 });
@@ -265,7 +426,7 @@ function getNextVehicleName() {
   return `Vehicle ${loadedRoutePlan.vehicles.length + 1}`;
 }
 
-function confirmAddVehicle() {
+async function confirmAddVehicle() {
   const vehicleName = $("#vehicleName").val().trim() || getNextVehicleName();
   const capacity = parseInt($("#vehicleCapacity").val());
   const lat = parseFloat($("#vehicleHomeLat").val());
@@ -321,13 +482,13 @@ function confirmAddVehicle() {
   }
 
   // Refresh display
-  renderRoutes(loadedRoutePlan);
+  await renderRoutes(loadedRoutePlan);
   renderTimelines(loadedRoutePlan);
 
   showNotification(`Vehicle "${vehicleName}" added successfully!`, "success");
 }
 
-function removeLastVehicle() {
+async function removeLastVehicle() {
   if (optimizing) {
     alert("Cannot remove vehicles while solving. Please stop solving first.");
     return;
@@ -367,13 +528,13 @@ function removeLastVehicle() {
   }
 
   // Refresh display
-  renderRoutes(loadedRoutePlan);
+  await renderRoutes(loadedRoutePlan);
   renderTimelines(loadedRoutePlan);
 
   showNotification(`Vehicle "${lastVehicle.name || lastVehicle.id}" removed.`, "info");
 }
 
-function removeVehicle(vehicleId) {
+async function removeVehicle(vehicleId) {
   if (optimizing) {
     alert("Cannot remove vehicles while solving. Please stop solving first.");
     return;
@@ -417,7 +578,7 @@ function removeVehicle(vehicleId) {
   }
 
   // Refresh display
-  renderRoutes(loadedRoutePlan);
+  await renderRoutes(loadedRoutePlan);
   renderTimelines(loadedRoutePlan);
 
   showNotification(`Vehicle "${vehicle.name || vehicleId}" removed.`, "info");
@@ -596,10 +757,15 @@ function createRouteNumberIcon(number, color) {
   });
 }
 
-function renderRouteLines(highlightedId = null) {
+async function renderRouteLines(highlightedId = null) {
   routeGroup.clearLayers();
 
   if (!loadedRoutePlan) return;
+
+  // Fetch geometries during solving (routes change)
+  if (scheduleId) {
+    routeGeometries = await fetchRouteGeometries();
+  }
 
   const visitByIdMap = new Map(loadedRoutePlan.visits.map(visit => [visit.id, visit]));
 
@@ -612,7 +778,24 @@ function renderRouteLines(highlightedId = null) {
     const weight = isHighlighted && highlightedId !== null ? 5 : 3;
     const opacity = isHighlighted ? 1 : 0.2;
 
-    if (locations.length > 0) {
+    const vehicleGeometry = routeGeometries?.[vehicle.id];
+
+    if (vehicleGeometry && vehicleGeometry.length > 0) {
+      // Draw real road routes using decoded polylines
+      for (const encodedSegment of vehicleGeometry) {
+        if (encodedSegment) {
+          const points = decodePolyline(encodedSegment);
+          if (points.length > 0) {
+            L.polyline(points, {
+              color: color,
+              weight: weight,
+              opacity: opacity
+            }).addTo(routeGroup);
+          }
+        }
+      }
+    } else if (locations.length > 0) {
+      // Fallback to straight lines if no geometry available
       L.polyline([homeLocation, ...locations, homeLocation], {
         color: color,
         weight: weight,
@@ -773,7 +956,7 @@ function getVisitMarker(visit) {
   return marker;
 }
 
-function renderRoutes(solution) {
+async function renderRoutes(solution) {
   if (!initialized) {
     const bounds = [solution.southWestCorner, solution.northEastCorner];
     map.fitBounds(bounds);
@@ -827,8 +1010,8 @@ function renderRoutes(solution) {
   solution.visits.forEach(function (visit) {
     getVisitMarker(visit).setPopupContent(visitPopupContent(visit));
   });
-  // Route - use the dedicated function which handles highlighting
-  renderRouteLines(highlightedVehicleId);
+  // Route - use the dedicated function which handles highlighting (await to ensure geometries load)
+  await renderRouteLines(highlightedVehicleId);
 
   // Summary
   $("#score").text(solution.score ? `Score: ${solution.score}` : "Score: ?");
@@ -841,7 +1024,7 @@ function renderTimelines(routePlan) {
   byVehicleItemData.clear();
   byVisitItemData.clear();
 
-  // Build lookup maps for enhanced display
+  // Build lookup maps for O(1) access
   const vehicleById = new Map(routePlan.vehicles.map(v => [v.id, v]));
   const visitById = new Map(routePlan.visits.map(v => [v.id, v]));
   const visitOrderMap = new Map();
@@ -1162,9 +1345,9 @@ function applyRecommendationModal(recommendations) {
   );
 }
 
-function updateSolutionWithNewVisit(newSolution) {
+async function updateSolutionWithNewVisit(newSolution) {
   loadedRoutePlan = newSolution;
-  renderRoutes(newSolution);
+  await renderRoutes(newSolution);
   renderTimelines(newSolution);
   $('#newVisitModal').modal('hide');
 }
@@ -1199,6 +1382,9 @@ function setupAjax() {
 }
 
 function solve() {
+  // Clear geometry cache - will be refreshed when solution updates
+  routeGeometries = null;
+
   $.ajax({
     url: "/route-plans",
     type: "POST",
@@ -1240,30 +1426,52 @@ function refreshSolvingButtons(solving) {
   }
 }
 
-function refreshRoutePlan() {
+async function refreshRoutePlan() {
   let path = "/route-plans/" + scheduleId;
-  if (scheduleId === null) {
+  let isLoadingDemoData = scheduleId === null;
+
+  if (isLoadingDemoData) {
     if (demoDataId === null) {
       alert("Please select a test data set.");
       return;
     }
 
-    path = "/demo-data/" + demoDataId;
+    // Clear geometry cache when loading new demo data
+    routeGeometries = null;
+
+    // Use SSE streaming for demo data loading to show progress
+    try {
+      const routePlan = await loadDemoDataWithProgress(demoDataId);
+      loadedRoutePlan = routePlan;
+      refreshSolvingButtons(
+        routePlan.solverStatus != null &&
+          routePlan.solverStatus !== "NOT_SOLVING",
+      );
+      await renderRoutes(routePlan);
+      renderTimelines(routePlan);
+      initialized = true;
+    } catch (error) {
+      showError("Getting demo data has failed: " + error.message, {});
+      refreshSolvingButtons(false);
+    }
+    return;
   }
 
-  $.getJSON(path, function (routePlan) {
+  // Loading existing route plan (during solving)
+  try {
+    const routePlan = await $.getJSON(path);
     loadedRoutePlan = routePlan;
     refreshSolvingButtons(
       routePlan.solverStatus != null &&
         routePlan.solverStatus !== "NOT_SOLVING",
     );
-    renderRoutes(routePlan);
+    await renderRoutes(routePlan);
     renderTimelines(routePlan);
     initialized = true;
-  }).fail(function (xhr, ajaxOptions, thrownError) {
-    showError("Getting route plan has failed.", xhr);
+  } catch (error) {
+    showError("Getting route plan has failed.", error);
     refreshSolvingButtons(false);
-  });
+  }
 }
 
 function stopSolving() {
@@ -1360,6 +1568,12 @@ function replaceQuickstartSolverForgeAutoHeaderFooter() {
             </ul>
           </div>
           <div class="ms-auto d-flex align-items-center gap-3">
+              <div class="form-check form-switch d-flex align-items-center" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Enable real road routing using OpenStreetMap data. Slower initial load (~5-15s for download), but shows accurate road routes instead of straight lines.">
+                  <input class="form-check-input" type="checkbox" id="realRoadRouting" style="width: 2.5em; height: 1.25em; cursor: pointer;">
+                  <label class="form-check-label ms-2" for="realRoadRouting" style="white-space: nowrap; cursor: pointer;">
+                      <i class="fas fa-road"></i> Real Roads
+                  </label>
+              </div>
               <div class="dropdown">
                   <button class="btn dropdown-toggle" type="button" id="dropdownMenuButton" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false" style="background-color: #10b981; color: #ffffff; border-color: #10b981;">
                       Data
