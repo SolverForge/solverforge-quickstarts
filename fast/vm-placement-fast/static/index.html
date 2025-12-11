@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>VM Placement - SolverForge for Python</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link rel="stylesheet" href="/webjars/solverforge/css/solverforge-webui.css">
+    <link rel="icon" href="/webjars/solverforge/img/solverforge-favicon.svg" type="image/svg+xml">
+    <style>
+        /* Solving spinner */
+        #solvingSpinner {
+            display: none;
+            width: 1.25rem;
+            height: 1.25rem;
+            border: 2px solid #10b981;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.75s linear infinite;
+            vertical-align: middle;
+        }
+        #solvingSpinner.active {
+            display: inline-block;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Rack visualization */
+        .rack-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+            padding: 1rem;
+        }
+        .rack {
+            background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+            border-radius: 8px;
+            padding: 1rem;
+            min-width: 280px;
+            flex: 1;
+            max-width: 400px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+        .rack-header {
+            color: #10b981;
+            font-weight: bold;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #10b981;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .rack-header i {
+            font-size: 1rem;
+        }
+        .server-blade {
+            background: linear-gradient(90deg, #2d3748 0%, #1a202c 100%);
+            border: 1px solid #4a5568;
+            border-radius: 4px;
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        .server-blade:hover {
+            border-color: #10b981;
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+            transform: translateX(4px);
+        }
+        .server-blade.empty {
+            opacity: 0.5;
+        }
+        .server-blade.overcommitted {
+            border-color: #ef4444;
+            box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
+        }
+        .server-blade-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        .server-name {
+            color: #e2e8f0;
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+        .server-specs {
+            color: #718096;
+            font-size: 0.7rem;
+        }
+        .utilization-mini {
+            display: flex;
+            gap: 0.25rem;
+            margin-bottom: 0.5rem;
+        }
+        .util-mini-bar {
+            flex: 1;
+            height: 6px;
+            background: #4a5568;
+            border-radius: 3px;
+            overflow: hidden;
+            position: relative;
+        }
+        .util-mini-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.5s ease, background 0.3s ease;
+        }
+        .util-mini-fill.low { background: linear-gradient(90deg, #10b981, #34d399); }
+        .util-mini-fill.medium { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+        .util-mini-fill.high { background: linear-gradient(90deg, #ef4444, #f87171); }
+        .util-mini-fill.over { background: linear-gradient(90deg, #991b1b, #dc2626); }
+        .util-mini-label {
+            position: absolute;
+            right: 2px;
+            top: -1px;
+            font-size: 0.5rem;
+            color: #fff;
+            text-shadow: 0 0 2px rgba(0,0,0,0.8);
+        }
+        .vm-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+        .vm-chip {
+            font-size: 0.65rem;
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: white;
+            font-weight: 500;
+            transition: transform 0.2s ease;
+            cursor: default;
+        }
+        .vm-chip:hover {
+            transform: scale(1.1);
+            z-index: 10;
+        }
+        .vm-chip.priority-5 { background: linear-gradient(135deg, #7c3aed, #a855f7); }
+        .vm-chip.priority-4 { background: linear-gradient(135deg, #2563eb, #3b82f6); }
+        .vm-chip.priority-3 { background: linear-gradient(135deg, #059669, #10b981); }
+        .vm-chip.priority-2 { background: linear-gradient(135deg, #4b5563, #6b7280); }
+        .vm-chip.priority-1 { background: linear-gradient(135deg, #9ca3af, #d1d5db); color: #1f2937; }
+        .vm-chip.affinity {
+            box-shadow: 0 0 0 2px #f59e0b;
+        }
+        .vm-chip.anti-affinity {
+            box-shadow: 0 0 0 2px #ef4444;
+        }
+
+        /* Summary cards */
+        .summary-card {
+            background: white;
+            border-radius: 12px;
+            padding: 1.25rem;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .summary-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+        }
+        .summary-card .value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #1f2937;
+            line-height: 1.2;
+        }
+        .summary-card .label {
+            font-size: 0.8rem;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .summary-card.highlight .value {
+            color: #10b981;
+        }
+        .summary-card.warning .value {
+            color: #f59e0b;
+        }
+        .summary-card.danger .value {
+            color: #ef4444;
+        }
+
+        /* Unassigned VMs panel */
+        .unassigned-panel {
+            background: white;
+            border-radius: 12px;
+            padding: 1rem;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .unassigned-vm {
+            background: linear-gradient(135deg, #fef3c7, #fde68a);
+            border-left: 4px solid #f59e0b;
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+            border-radius: 0 8px 8px 0;
+            transition: transform 0.2s ease;
+        }
+        .unassigned-vm:hover {
+            transform: translateX(4px);
+        }
+        .unassigned-vm .name {
+            font-weight: 600;
+            color: #92400e;
+        }
+        .unassigned-vm .details {
+            font-size: 0.75rem;
+            color: #78716c;
+            margin-top: 0.25rem;
+        }
+        .all-assigned {
+            background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+            border-left: 4px solid #10b981;
+            padding: 1rem;
+            border-radius: 0 8px 8px 0;
+            color: #065f46;
+            text-align: center;
+        }
+        .all-assigned i {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+            display: block;
+        }
+
+        /* Legend */
+        .legend {
+            background: #f9fafb;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+        .legend h6 {
+            font-size: 0.8rem;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.75rem;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.75rem;
+            margin-bottom: 0.25rem;
+        }
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 4px;
+        }
+
+        /* Constraint markers */
+        .constraint-marker {
+            font-size: 0.6rem;
+            padding: 1px 4px;
+            border-radius: 2px;
+            margin-left: 4px;
+        }
+        .constraint-marker.affinity {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        .constraint-marker.anti-affinity {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        /* View toggle */
+        .view-toggle {
+            margin-bottom: 1rem;
+        }
+        .view-toggle .btn-check:checked + .btn {
+            background-color: #10b981;
+            border-color: #10b981;
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .rack {
+                max-width: 100%;
+            }
+        }
+
+        /* Flying VM animation */
+        .flying-vm {
+            position: fixed;
+            z-index: 9999;
+            pointer-events: none;
+            transition: none;
+        }
+        .flying-vm.animate {
+            transition: transform 200ms ease-in-out, opacity 200ms ease;
+        }
+
+        /* Utilization bar pulse on change */
+        @keyframes utilPulse {
+            0%, 100% { box-shadow: none; }
+            50% { box-shadow: 0 0 8px 2px rgba(16, 185, 129, 0.6); }
+        }
+        .util-mini-fill.changed {
+            animation: utilPulse 300ms ease;
+        }
+
+        /* Server highlight when receiving VM */
+        @keyframes serverReceive {
+            0%, 100% { box-shadow: inset 0 0 0 0 rgba(16, 185, 129, 0); }
+            50% { box-shadow: inset 0 0 20px 5px rgba(16, 185, 129, 0.3); }
+        }
+        .server-blade.receiving {
+            animation: serverReceive 300ms ease;
+        }
+
+        /* Server highlight when losing VM */
+        @keyframes serverSend {
+            0%, 100% { box-shadow: inset 0 0 0 0 rgba(239, 68, 68, 0); }
+            50% { box-shadow: inset 0 0 15px 3px rgba(239, 68, 68, 0.2); }
+        }
+        .server-blade.sending {
+            animation: serverSend 200ms ease;
+        }
+
+        /* Score update flash */
+        @keyframes scoreFlash {
+            0%, 100% { background: transparent; }
+            50% { background: rgba(16, 185, 129, 0.2); }
+        }
+        .score.updated {
+            animation: scoreFlash 300ms ease;
+            border-radius: 4px;
+            padding: 2px 8px;
+        }
+
+        /* Summary card value change */
+        @keyframes valueChange {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+        .summary-card .value.changed {
+            animation: valueChange 300ms ease;
+        }
+    </style>
+</head>
+<body>
+
+<header id="solverforge-auto-header">
+    <!-- Filled in by app.js -->
+</header>
+
+<div class="tab-content">
+    <div id="demo" class="tab-pane fade show active container-fluid">
+        <div class="sticky-top d-flex justify-content-center align-items-center" aria-live="polite" aria-atomic="true">
+            <div id="notificationPanel" style="position: absolute; top: .5rem;"></div>
+        </div>
+
+        <h1>VM Placement Optimizer</h1>
+        <p>Optimize virtual machine placement across servers to maximize resource utilization while respecting constraints.</p>
+
+        <div class="mb-4">
+            <button id="solveButton" type="button" class="btn btn-success">
+                <i class="fas fa-play"></i> Solve
+            </button>
+            <button id="stopSolvingButton" type="button" class="btn btn-danger" style="display: none;">
+                <i class="fas fa-stop"></i> Stop solving
+            </button>
+            <span id="solvingSpinner" class="ms-2"></span>
+            <span id="score" class="score ms-2 align-middle fw-bold">Score: ?</span>
+            <button id="analyzeButton" type="button" class="ms-2 btn btn-secondary">
+                <i class="fas fa-question"></i>
+            </button>
+
+            <div class="float-end">
+                <div class="btn-group view-toggle me-2" role="group" aria-label="View toggle">
+                    <input type="radio" class="btn-check" name="viewToggle" id="rackView" autocomplete="off" checked>
+                    <label class="btn btn-outline-secondary btn-sm" for="rackView">
+                        <i class="fas fa-server"></i> Rack View
+                    </label>
+                    <input type="radio" class="btn-check" name="viewToggle" id="cardView" autocomplete="off">
+                    <label class="btn btn-outline-secondary btn-sm" for="cardView">
+                        <i class="fas fa-th-large"></i> Card View
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="row mb-4 g-3" id="summaryCards">
+            <div class="col-6 col-md-4 col-lg-2">
+                <div class="summary-card">
+                    <div class="value" id="totalServers">-</div>
+                    <div class="label">Total Servers</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <div class="summary-card highlight">
+                    <div class="value" id="activeServers">-</div>
+                    <div class="label">Active Servers</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <div class="summary-card">
+                    <div class="value" id="totalVms">-</div>
+                    <div class="label">Total VMs</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <div class="summary-card" id="unassignedCard">
+                    <div class="value" id="unassignedVms">-</div>
+                    <div class="label">Unassigned</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <div class="summary-card">
+                    <div class="value" id="cpuUtil">-</div>
+                    <div class="label">CPU Util</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <div class="summary-card">
+                    <div class="value" id="memUtil">-</div>
+                    <div class="label">Memory Util</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="row">
+            <!-- Rack/Card View -->
+            <div class="col-lg-9">
+                <div id="rackViewContainer" class="rack-container">
+                    <p class="text-muted">Select a dataset to see server rack visualization</p>
+                </div>
+                <div id="cardViewContainer" class="row g-3" style="display: none;">
+                    <p class="text-muted">Select a dataset to see server cards</p>
+                </div>
+            </div>
+
+            <!-- Sidebar -->
+            <div class="col-lg-3">
+                <div class="unassigned-panel mb-3">
+                    <h5 class="mb-3"><i class="fas fa-exclamation-triangle text-warning me-2"></i>Unassigned VMs</h5>
+                    <div id="unassignedList">
+                        <p class="text-muted small">No data loaded</p>
+                    </div>
+                </div>
+
+                <div class="legend">
+                    <h6><i class="fas fa-palette me-1"></i>Priority Legend</h6>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: linear-gradient(135deg, #7c3aed, #a855f7);"></div>
+                        <span>Critical (5)</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: linear-gradient(135deg, #2563eb, #3b82f6);"></div>
+                        <span>High (4)</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: linear-gradient(135deg, #059669, #10b981);"></div>
+                        <span>Medium (3)</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: linear-gradient(135deg, #4b5563, #6b7280);"></div>
+                        <span>Low (2)</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: linear-gradient(135deg, #9ca3af, #d1d5db);"></div>
+                        <span>Lowest (1)</span>
+                    </div>
+                    <hr class="my-2">
+                    <h6><i class="fas fa-link me-1"></i>Constraints</h6>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #fef3c7; box-shadow: 0 0 0 2px #f59e0b;"></div>
+                        <span>Affinity Group</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #fee2e2; box-shadow: 0 0 0 2px #ef4444;"></div>
+                        <span>Anti-Affinity Group</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="rest" class="tab-pane fade container-fluid">
+        <h1>REST API Guide</h1>
+
+        <h2>VM Placement solver integration via cURL</h2>
+
+        <h3>1. Download demo data</h3>
+        <pre>
+            <button class="btn btn-outline-dark btn-sm float-end" onclick="copyTextToClipboard('curl1')">Copy</button>
+            <code id="curl1">curl -X GET -H 'Accept:application/json' http://localhost:8080/demo-data/SMALL -o sample.json</code>
+        </pre>
+
+        <h3>2. Post the sample data for solving</h3>
+        <p>The POST operation returns a <code>jobId</code> that should be used in subsequent commands.</p>
+        <pre>
+            <button class="btn btn-outline-dark btn-sm float-end" onclick="copyTextToClipboard('curl2')">Copy</button>
+            <code id="curl2">curl -X POST -H 'Content-Type:application/json' http://localhost:8080/placements -d@sample.json</code>
+        </pre>
+
+        <h3>3. Get the current status and score</h3>
+        <pre>
+            <button class="btn btn-outline-dark btn-sm float-end" onclick="copyTextToClipboard('curl3')">Copy</button>
+            <code id="curl3">curl -X GET -H 'Accept:application/json' http://localhost:8080/placements/{jobId}/status</code>
+        </pre>
+
+        <h3>4. Get the complete solution</h3>
+        <pre>
+            <button class="btn btn-outline-dark btn-sm float-end" onclick="copyTextToClipboard('curl4')">Copy</button>
+            <code id="curl4">curl -X GET -H 'Accept:application/json' http://localhost:8080/placements/{jobId}</code>
+        </pre>
+
+        <h3>5. Terminate solving early</h3>
+        <pre>
+            <button class="btn btn-outline-dark btn-sm float-end" onclick="copyTextToClipboard('curl5')">Copy</button>
+            <code id="curl5">curl -X DELETE -H 'Accept:application/json' http://localhost:8080/placements/{jobId}</code>
+        </pre>
+    </div>
+
+    <div id="openapi" class="tab-pane fade container-fluid">
+        <h1>REST API Reference</h1>
+        <div class="ratio ratio-1x1">
+            <iframe src="/q/swagger-ui" style="overflow:hidden;" scrolling="no"></iframe>
+        </div>
+    </div>
+</div>
+
+<!-- Score Analysis Modal -->
+<div class="modal fade" id="scoreAnalysisModal" tabindex="-1" aria-labelledby="scoreAnalysisModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="scoreAnalysisModalLabel">Score Analysis <span id="scoreAnalysisScoreLabel"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="scoreAnalysisModalContent">
+                <!-- Filled in by app.js -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Server Detail Modal -->
+<div class="modal fade" id="serverDetailModal" tabindex="-1" aria-labelledby="serverDetailModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="serverDetailModalLabel"><i class="fas fa-server me-2"></i>Server Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="serverDetailModalContent">
+                <!-- Filled in by app.js -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<footer id="solverforge-auto-footer"></footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/2.11.8/umd/popper.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/js/bootstrap.min.js"></script>
+<script src="/webjars/solverforge/js/solverforge-webui.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
