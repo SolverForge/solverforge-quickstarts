@@ -13,12 +13,7 @@ Each stock has an **ML-predicted return** (e.g., "Apple is expected to return 12
 
 ## Why Constraint Solving?
 
-A naive approach would sort stocks by predicted return and pick the top 20.
-But this fails when high-return stocks are concentrated in one sector!
-
-**Example**: If the top 8 stocks are all Technology, picking them all would put 40% in Tech, violating the 25% sector limit.
-
-The **constraint solver** explores millions of combinations to find the globally optimal portfolio that satisfies all constraints simultaneously.
+With constraints, you describe *what* a valid portfolio looks like, not *how* to build one. Adding a new business rule is a single constraint function—not a rewrite of your algorithm.
 
 ## Quick Start
 
@@ -51,13 +46,13 @@ pytest tests/test_constraints.py
 
 ## Comparison Script
 
-See how constraint solving beats greedy algorithms:
+Compare constraint solving vs greedy algorithms:
 
 ```bash
 python scripts/comparison.py
 ```
 
-Output shows expected return difference, sector allocation, and analysis.
+Output shows expected return, sector allocation, and when each approach excels.
 
 ## Project Structure
 

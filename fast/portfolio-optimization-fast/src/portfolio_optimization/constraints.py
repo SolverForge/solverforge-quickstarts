@@ -11,11 +11,10 @@ SOFT CONSTRAINTS (optimize for):
 3. penalize_unselected_stock: Drive solver to select stocks (high penalty)
 4. maximize_expected_return: Prefer stocks with higher ML-predicted returns
 
-WHY CONSTRAINT SOLVING BEATS IF/ELSE:
-- With 50 stocks and 5 sectors, there are millions of possible portfolios
-- Multiple constraints interact: selecting high-return stocks might violate sector limits
-- Greedy algorithms get stuck in local optima
-- Constraint solvers explore the solution space systematically
+WHY USE CONSTRAINT SOLVING:
+- Declarative: describe what you want, not how to achieve it
+- Extensible: adding a constraint is one function, not algorithm rewrite
+- Scales with complexity: as rules multiply, greedy logic becomes brittle
 
 CONFIGURATION:
 - Constraints read thresholds from PortfolioConfig (a problem fact)

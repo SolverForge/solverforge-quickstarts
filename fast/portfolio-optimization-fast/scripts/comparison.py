@@ -2,21 +2,23 @@
 """
 Comparison Script: Constraint Solver vs Greedy Algorithm
 
-This script demonstrates why constraint solving is valuable for portfolio optimization
-by comparing two approaches:
+This script compares two approaches to portfolio optimization:
 
 1. GREEDY ALGORITHM (if/else logic):
    - Sort stocks by predicted return
    - Pick top N stocks
    - Check sector limits, skip if violated
-   - Simple but suboptimal
 
 2. CONSTRAINT SOLVER (SolverForge):
    - Define constraints declaratively
    - Let solver explore solution space
-   - Find globally optimal solution
 
-Run this script to see the difference:
+For this simplified problem (Boolean selection with sector limits), both
+approaches find good solutions. The value of constraint solving emerges
+when you add complex business rules - each new constraint is just a
+function, not a rewrite of your algorithm.
+
+Run this script:
     cd portfolio-optimization-fast
     python scripts/comparison.py
 
@@ -24,7 +26,6 @@ OUTPUT SHOWS:
 - Expected return comparison
 - Sector allocation differences
 - Which stocks each method selects
-- Why constraint solving wins
 """
 import sys
 from pathlib import Path
@@ -33,7 +34,27 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from portfolio_optimization.demo_data import generate_demo_data, DemoData
-from portfolio_optimization.domain import PortfolioOptimizationPlan, StockSelection
+from portfolio_optimization.domain import (
+    PortfolioOptimizationPlan,
+    StockSelection,
+    SELECTED,
+    NOT_SELECTED,
+)
+
+
+def calculate_score(plan: PortfolioOptimizationPlan) -> int:
+    """Calculate the soft score for a portfolio using the same logic as constraints."""
+    selected = [s for s in plan.stocks if s.selected is True]
+    unselected = [s for s in plan.stocks if s.selected is False]
+
+    # Penalty for unselected stocks
+    unselected_penalty = len(unselected) * plan.portfolio_config.unselected_penalty
+
+    # Reward for selected stock returns
+    return_reward = sum(int(s.predicted_return * 10000) for s in selected)
+
+    soft_score = return_reward - unselected_penalty
+    return soft_score
 
 
 def greedy_portfolio(plan: PortfolioOptimizationPlan) -> PortfolioOptimizationPlan:
@@ -87,7 +108,7 @@ def greedy_portfolio(plan: PortfolioOptimizationPlan) -> PortfolioOptimizationPl
             stock_name=s.stock_name,
             sector=s.sector,
             predicted_return=s.predicted_return,
-            selected=s.stock_id in selected_ids
+            selection=SELECTED if s.stock_id in selected_ids else NOT_SELECTED
         )
         for s in plan.stocks
     ]
@@ -107,8 +128,6 @@ def solver_portfolio(plan: PortfolioOptimizationPlan) -> PortfolioOptimizationPl
     - Must select exactly 20 stocks
     - Max 5 stocks per sector (25%)
     - Maximize expected return
-
-    The solver explores millions of combinations to find the optimal solution.
     """
     from solverforge_legacy.solver import SolverFactory
     from solverforge_legacy.solver.config import (
@@ -119,14 +138,14 @@ def solver_portfolio(plan: PortfolioOptimizationPlan) -> PortfolioOptimizationPl
     )
     from portfolio_optimization.constraints import define_constraints
 
-    # Configure solver with 10-second time limit for comparison
+    # Configure solver with 30-second time limit for comparison
     solver_config = SolverConfig(
         solution_class=PortfolioOptimizationPlan,
         entity_class_list=[StockSelection],
         score_director_factory_config=ScoreDirectorFactoryConfig(
             constraint_provider_function=define_constraints
         ),
-        termination_config=TerminationConfig(spent_limit=Duration(seconds=10)),
+        termination_config=TerminationConfig(spent_limit=Duration(seconds=30)),
     )
 
     solver = SolverFactory.create(solver_config).build_solver()
@@ -218,7 +237,7 @@ def print_comparison(greedy_metrics: dict, solver_metrics: dict):
     # Analysis
     print("ANALYSIS")
     print("-" * 70)
-    if diff > 0:
+    if diff > 0.5:
         print(f"  The constraint solver found a portfolio with {diff:.2f}% higher expected return!")
         print()
         print("  Why? The greedy algorithm:")
@@ -230,18 +249,36 @@ def print_comparison(greedy_metrics: dict, solver_metrics: dict):
         print("  - Explores the full solution space systematically")
         print("  - Balances high returns with sector diversification")
         print("  - Finds the globally optimal portfolio")
-    else:
+    elif diff > -0.5:
         print("  Both methods found similar solutions for this dataset.")
-        print("  Try the LARGE dataset for more complex scenarios.")
+        print()
+        print("  This is expected for portfolio selection problems where greedy")
+        print("  algorithms perform well. The value of constraint solvers becomes")
+        print("  apparent with more complex constraints (minimum sector holdings,")
+        print("  stock correlations, risk limits) or larger search spaces.")
+    else:
+        print(f"  The greedy algorithm found a better solution ({-diff:.2f}% higher return)!")
+        print()
+        print("  Why? For simple portfolio selection problems, greedy algorithms")
+        print("  are highly effective because:")
+        print("  - The objective (maximize return) aligns with greedy choices")
+        print("  - Sector limits are easy to satisfy by skipping stocks")
+        print()
+        print("  Constraint solvers excel with more complex constraints like:")
+        print("  - Minimum stocks per sector (diversification floors)")
+        print("  - Correlation limits between selected stocks")
+        print("  - Multi-objective optimization (return vs risk)")
     print()
     print("=" * 70)
 
 
 def main():
     print("\nLoading demo data...")
-    plan = generate_demo_data(DemoData.SMALL)
+    plan = generate_demo_data(DemoData.LARGE)
 
-    print(f"Dataset: {len(plan.stocks)} stocks across 4 sectors")
+    # Count unique sectors
+    sectors = set(s.sector for s in plan.stocks)
+    print(f"Dataset: {len(plan.stocks)} stocks across {len(sectors)} sectors")
     print(f"Target: Select {plan.target_position_count} stocks with max 25% per sector")
     print()
 
@@ -250,7 +287,7 @@ def main():
     greedy_metrics = calculate_metrics(greedy_result)
     print(f"  Selected {greedy_metrics['selected_count']} stocks, {greedy_metrics['expected_return']:.2f}% expected return")
 
-    print("Running CONSTRAINT SOLVER (10 seconds)...")
+    print("Running CONSTRAINT SOLVER (30 seconds)...")
     solver_result = solver_portfolio(plan)
     solver_metrics = calculate_metrics(solver_result)
     print(f"  Selected {solver_metrics['selected_count']} stocks, {solver_metrics['expected_return']:.2f}% expected return")
