@@ -49,6 +49,17 @@ Find the most efficient routes for a fleet of vehicles.
 
 7. Click on the **Solve** button.
 
+### Real Roads Mode
+
+By default, routes use haversine (straight-line) distance estimates for fast solving.
+To display actual road routes:
+
+1. Enable the **Real Roads** toggle before loading demo data
+2. The first load will download OpenStreetMap road network data (cached locally)
+3. Routes will display as actual road paths instead of straight lines
+
+Note: Real roads mode is slower initially but provides accurate driving times and visual route display.
+
 ## Test the application
 
 1. Run tests:

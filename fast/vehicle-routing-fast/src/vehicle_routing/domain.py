@@ -15,10 +15,13 @@ from solverforge_legacy.solver.domain import (
 )
 
 from datetime import datetime, timedelta
-from typing import Annotated, Optional, List, Union
+from typing import Annotated, Optional, List, Union, ClassVar, TYPE_CHECKING
 from dataclasses import dataclass, field
 from .json_serialization import JsonDomainBase
 from pydantic import Field
+
+if TYPE_CHECKING:
+    from .routing import DistanceMatrix
 
 
 @dataclass
@@ -26,10 +29,15 @@ class Location:
     """
     Represents a geographic location with latitude and longitude.
 
-    Driving times are calculated using the Haversine formula for great-circle distance.
+    Driving times can be computed using either:
+    1. A precomputed distance matrix (if set) - uses real road network data
+    2. The Haversine formula (fallback) - uses great-circle distance
     """
     latitude: float
     longitude: float
+
+    # Class-level distance matrix (injected at problem load time)
+    _distance_matrix: ClassVar[Optional["DistanceMatrix"]] = None
 
     # Earth radius in meters
     _EARTH_RADIUS_M = 6371000
@@ -37,10 +45,30 @@ class Location:
     # Average driving speed assumption: 50 km/h
     _AVERAGE_SPEED_KMPH = 50
 
+    @classmethod
+    def set_distance_matrix(cls, matrix: "DistanceMatrix") -> None:
+        """Inject a precomputed distance matrix for real road routing."""
+        cls._distance_matrix = matrix
+
+    @classmethod
+    def clear_distance_matrix(cls) -> None:
+        """Clear the distance matrix (reverts to haversine fallback)."""
+        cls._distance_matrix = None
+
+    @classmethod
+    def get_distance_matrix(cls) -> Optional["DistanceMatrix"]:
+        """Get the current distance matrix, if any."""
+        return cls._distance_matrix
+
     def driving_time_to(self, other: "Location") -> int:
         """
-        Get driving time in seconds to another location using Haversine formula.
+        Get driving time in seconds to another location.
+
+        Uses the precomputed distance matrix if available, otherwise
+        falls back to haversine calculation.
         """
+        if self._distance_matrix is not None:
+            return self._distance_matrix.get_driving_time(self, other)
         return self._calculate_driving_time_haversine(other)
 
     def _calculate_driving_time_haversine(self, other: "Location") -> int:

@@ -111,7 +111,7 @@
       opacity: 0;
     }
 
-    /* Timeline enhancements */
+    /* Timeline stop badges */
     .timeline-stop-badge {
       background-color: #6366f1;
       color: white;
@@ -134,6 +134,47 @@
     }
     .vis-labelset .vis-label {
       padding: 4px 8px;
+    }
+
+    /* Loading overlay */
+    .loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(255, 255, 255, 0.95);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 2000;
+      transition: opacity 0.3s ease;
+    }
+    .loading-overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .loading-content {
+      text-align: center;
+      padding: 2rem;
+    }
+    .loading-spinner {
+      width: 60px;
+      height: 60px;
+      border: 4px solid #e5e7eb;
+      border-top-color: #10b981;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 1.5rem;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Real Roads toggle styling */
+    #realRoadRouting:checked {
+      background-color: #10b981;
+      border-color: #10b981;
     }
   </style>
 </head>
@@ -397,6 +438,19 @@
         <button type="button" class="btn btn-success" id="confirmAddVehicle"><i class="fas fa-plus"></i> Add Vehicle</button>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- Loading/Progress Overlay -->
+<div id="loadingOverlay" class="loading-overlay hidden">
+  <div class="loading-content">
+    <div class="loading-spinner"></div>
+    <h5 id="loadingTitle">Loading Demo Data</h5>
+    <p id="loadingMessage" class="text-muted mb-2">Initializing...</p>
+    <div class="progress" style="width: 300px; height: 8px;">
+      <div id="loadingProgress" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+    </div>
+    <small id="loadingDetail" class="text-muted mt-2 d-block"></small>
   </div>
 </div>
 
