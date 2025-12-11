@@ -8,9 +8,9 @@ import logging
 
 from .domain import VMPlacementPlan, VMPlacementPlanModel
 from .converters import plan_to_model, model_to_plan
-from .demo_data import generate_demo_data, DemoData
+from .demo_data import generate_demo_data, generate_custom_data, DemoData
 from .solver import solver_manager, solution_manager
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,23 @@ async def get_demo_data_by_name(demo_name: str) -> VMPlacementPlanModel:
         return plan_to_model(domain_plan)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Demo data '{demo_name}' not found")
+
+
+class CustomDataRequest(BaseModel):
+    rack_count: int = Field(default=3, ge=1, le=8, description="Number of racks")
+    servers_per_rack: int = Field(default=4, ge=2, le=10, description="Servers per rack")
+    vm_count: int = Field(default=20, ge=5, le=200, description="Number of VMs")
+
+
+@app.post("/demo-data/generate", response_model=VMPlacementPlanModel)
+async def generate_custom_demo_data(request: CustomDataRequest) -> VMPlacementPlanModel:
+    """Generate custom demo data with configurable infrastructure and workload."""
+    domain_plan = generate_custom_data(
+        rack_count=request.rack_count,
+        servers_per_rack=request.servers_per_rack,
+        vm_count=request.vm_count
+    )
+    return plan_to_model(domain_plan)
 
 
 @app.get("/placements/{problem_id}", response_model=VMPlacementPlanModel, response_model_exclude_none=True)

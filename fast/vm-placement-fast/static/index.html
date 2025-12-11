@@ -350,6 +350,39 @@
         .summary-card .value.changed {
             animation: valueChange 300ms ease;
         }
+
+        /* Progress animation during solving */
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+        .solving-pulse {
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        /* Advanced settings panel */
+        .settings-card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .settings-card .card-body {
+            padding: 1.25rem;
+        }
+        .form-range::-webkit-slider-thumb {
+            background: #10b981;
+        }
+        .form-range::-moz-range-thumb {
+            background: #10b981;
+        }
+        .config-value {
+            font-weight: 600;
+            color: #10b981;
+        }
+        .preset-description {
+            font-size: 0.85rem;
+            color: #64748b;
+        }
     </style>
 </head>
 <body>
@@ -381,6 +414,11 @@
             </button>
 
             <div class="float-end">
+                <button class="btn btn-outline-secondary btn-sm me-2" type="button"
+                        data-bs-toggle="collapse" data-bs-target="#advancedSettings"
+                        aria-expanded="false" aria-controls="advancedSettings">
+                    <i class="fas fa-cog"></i> Advanced
+                </button>
                 <div class="btn-group view-toggle me-2" role="group" aria-label="View toggle">
                     <input type="radio" class="btn-check" name="viewToggle" id="rackView" autocomplete="off" checked>
                     <label class="btn btn-outline-secondary btn-sm" for="rackView">
@@ -390,6 +428,84 @@
                     <label class="btn btn-outline-secondary btn-sm" for="cardView">
                         <i class="fas fa-th-large"></i> Card View
                     </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Advanced Settings Panel -->
+        <div class="collapse mb-4" id="advancedSettings">
+            <div class="settings-card">
+                <div class="card-body">
+                    <div class="row g-4">
+                        <!-- Infrastructure Settings -->
+                        <div class="col-md-6">
+                            <h6 class="text-muted mb-3"><i class="fas fa-server me-2"></i>Infrastructure</h6>
+                            <div class="row g-3">
+                                <div class="col-6">
+                                    <label class="form-label">
+                                        Racks: <span id="rackCountValue" class="config-value">3</span>
+                                    </label>
+                                    <input type="range" class="form-range" id="rackCountSlider"
+                                           min="1" max="8" step="1" value="3">
+                                    <div class="d-flex justify-content-between text-muted" style="font-size: 0.7rem;">
+                                        <span>1</span>
+                                        <span>8</span>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label">
+                                        Servers/Rack: <span id="serversPerRackValue" class="config-value">4</span>
+                                    </label>
+                                    <input type="range" class="form-range" id="serversPerRackSlider"
+                                           min="2" max="10" step="1" value="4">
+                                    <div class="d-flex justify-content-between text-muted" style="font-size: 0.7rem;">
+                                        <span>2</span>
+                                        <span>10</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Workload Settings -->
+                        <div class="col-md-6">
+                            <h6 class="text-muted mb-3"><i class="fas fa-cubes me-2"></i>Workload</h6>
+                            <div class="row g-3">
+                                <div class="col-6">
+                                    <label class="form-label">
+                                        VMs: <span id="vmCountValue" class="config-value">20</span>
+                                    </label>
+                                    <input type="range" class="form-range" id="vmCountSlider"
+                                           min="5" max="200" step="5" value="20">
+                                    <div class="d-flex justify-content-between text-muted" style="font-size: 0.7rem;">
+                                        <span>5</span>
+                                        <span>200</span>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label">
+                                        Solver Time: <span id="solverTimeValue" class="config-value">30s</span>
+                                    </label>
+                                    <input type="range" class="form-range" id="solverTimeSlider"
+                                           min="5" max="120" step="5" value="30">
+                                    <div class="d-flex justify-content-between text-muted" style="font-size: 0.7rem;">
+                                        <span>5s</span>
+                                        <span>2min</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Action buttons -->
+                    <div class="mt-3 d-flex justify-content-between align-items-center">
+                        <div class="preset-description">
+                            <i class="fas fa-info-circle me-1"></i>
+                            <span id="configSummary">12 servers across 3 racks, 20 VMs to place</span>
+                        </div>
+                        <button id="generateDataBtn" class="btn btn-primary btn-sm">
+                            <i class="fas fa-sync-alt me-1"></i> Generate New Data
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -580,5 +696,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/js/bootstrap.min.js"></script>
 <script src="/webjars/solverforge/js/solverforge-webui.js"></script>
 <script src="/app.js"></script>
+<script src="/config.js"></script>
 </body>
 </html>

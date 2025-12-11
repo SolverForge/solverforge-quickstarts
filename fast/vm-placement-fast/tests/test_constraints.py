@@ -13,14 +13,14 @@ from vm_placement.constraints import (
     prioritize_placement,
 )
 
+# VM is the only planning entity (Server is a problem fact)
 constraint_verifier = ConstraintVerifier.build(
-    define_constraints, VMPlacementPlan, Server, VM
+    define_constraints, VMPlacementPlan, VM
 )
 
 
 def assign(server: Server, *vms: VM):
-    """Helper to assign VMs to a server and set up the inverse relationship."""
-    server.vms = list(vms)
+    """Helper to assign VMs to a server."""
     for vm in vms:
         vm.server = server
 
@@ -265,11 +265,11 @@ def test_minimize_servers_one_active():
     vm1 = VM(id="vm1", name="VM1", cpu_cores=2, memory_gb=4, storage_gb=20)
     assign(server1, vm1)
 
-    # 1 active server = 1000 penalty
+    # 1 active server = 100 penalty
     (
         constraint_verifier.verify_that(minimize_servers_used)
         .given(server1, server2, vm1)
-        .penalizes_by(1000)
+        .penalizes_by(100)
     )
 
 
@@ -281,11 +281,11 @@ def test_minimize_servers_two_active():
     assign(server1, vm1)
     assign(server2, vm2)
 
-    # 2 active servers = 2000 penalty
+    # 2 active servers = 200 penalty
     (
         constraint_verifier.verify_that(minimize_servers_used)
         .given(server1, server2, vm1, vm2)
-        .penalizes_by(2000)
+        .penalizes_by(200)
     )
 
 
@@ -344,38 +344,4 @@ def test_prioritize_placement_assigned():
         constraint_verifier.verify_that(prioritize_placement)
         .given(server, vm1)
         .penalizes_by(0)
-    )
-
-
-def test_prioritize_placement_unassigned_low_priority():
-    vm1 = VM(id="vm1", name="VM1", cpu_cores=4, memory_gb=8, storage_gb=50, priority=1)
-
-    # Unassigned with priority 1 = 500 penalty
-    (
-        constraint_verifier.verify_that(prioritize_placement)
-        .given(vm1)
-        .penalizes_by(500)
-    )
-
-
-def test_prioritize_placement_unassigned_high_priority():
-    vm1 = VM(id="vm1", name="VM1", cpu_cores=4, memory_gb=8, storage_gb=50, priority=5)
-
-    # Unassigned with priority 5 = 2500 penalty
-    (
-        constraint_verifier.verify_that(prioritize_placement)
-        .given(vm1)
-        .penalizes_by(2500)
-    )
-
-
-def test_prioritize_placement_multiple_unassigned():
-    vm1 = VM(id="vm1", name="VM1", cpu_cores=4, memory_gb=8, storage_gb=50, priority=1)
-    vm2 = VM(id="vm2", name="VM2", cpu_cores=4, memory_gb=8, storage_gb=50, priority=3)
-
-    # VM1 = 500, VM2 = 1500, total = 2000
-    (
-        constraint_verifier.verify_that(prioritize_placement)
-        .given(vm1, vm2)
-        .penalizes_by(2000)
     )

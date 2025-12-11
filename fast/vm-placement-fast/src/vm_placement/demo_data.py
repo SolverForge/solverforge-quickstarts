@@ -1,4 +1,5 @@
 from enum import Enum
+import random
 from .domain import Server, VM, VMPlacementPlan
 
 
@@ -6,6 +7,133 @@ class DemoData(Enum):
     SMALL = "SMALL"
     MEDIUM = "MEDIUM"
     LARGE = "LARGE"
+
+
+def generate_custom_data(
+    rack_count: int = 3,
+    servers_per_rack: int = 4,
+    vm_count: int = 20
+) -> VMPlacementPlan:
+    """
+    Generate custom demo data with configurable infrastructure and workload.
+
+    Args:
+        rack_count: Number of racks (1-8)
+        servers_per_rack: Number of servers per rack (2-10)
+        vm_count: Number of VMs to place (5-200)
+    """
+    rack_count = max(1, min(8, rack_count))
+    servers_per_rack = max(2, min(10, servers_per_rack))
+    vm_count = max(5, min(200, vm_count))
+
+    servers = []
+    server_id = 1
+
+    # Generate rack names
+    rack_names = [f"rack-{chr(ord('a') + i)}" for i in range(rack_count)]
+
+    # Server templates: (cpu_cores, memory_gb, storage_gb, name_prefix)
+    server_templates = [
+        (48, 192, 2000, "large"),
+        (32, 128, 1000, "large"),
+        (24, 96, 1000, "medium"),
+        (16, 64, 512, "medium"),
+        (12, 48, 500, "small"),
+        (8, 32, 256, "small"),
+    ]
+
+    for rack_idx, rack_name in enumerate(rack_names):
+        for server_idx in range(servers_per_rack):
+            # Alternate between server sizes for variety
+            template_idx = (rack_idx + server_idx) % len(server_templates)
+            cpu, mem, storage, size = server_templates[template_idx]
+
+            servers.append(Server(
+                id=f"s{server_id}",
+                name=f"srv-{size}-{server_id:02d}",
+                cpu_cores=cpu,
+                memory_gb=mem,
+                storage_gb=storage,
+                rack=rack_name
+            ))
+            server_id += 1
+
+    vms = []
+    vm_id = 1
+
+    # VM templates: (cpu_cores, memory_gb, storage_gb, name_prefix, priority, group_type)
+    # group_type: None, "affinity", "anti-affinity"
+    vm_templates = [
+        # Critical database VMs - anti-affinity for HA
+        (8, 32, 200, "db", 5, "anti-affinity"),
+        # API servers
+        (4, 8, 50, "api", 4, None),
+        # Web tier - affinity for locality
+        (2, 4, 20, "web", 3, "affinity"),
+        # Cache tier - affinity
+        (4, 16, 30, "cache", 3, "affinity"),
+        # Workers
+        (2, 4, 40, "worker", 2, None),
+        # Dev/test - low priority
+        (2, 4, 30, "dev", 1, None),
+    ]
+
+    # Distribute VMs across templates
+    template_weights = [0.08, 0.15, 0.20, 0.10, 0.32, 0.15]  # Proportions
+
+    # Track affinity/anti-affinity group counts
+    affinity_groups = {}
+    anti_affinity_groups = {}
+
+    for i in range(vm_count):
+        # Pick template based on weighted distribution
+        rand_val = random.random()
+        cumulative = 0
+        template_idx = 0
+        for idx, weight in enumerate(template_weights):
+            cumulative += weight
+            if rand_val <= cumulative:
+                template_idx = idx
+                break
+
+        cpu, mem, storage, prefix, priority, group_type = vm_templates[template_idx]
+
+        # Determine group assignment
+        affinity_group = None
+        anti_affinity_group = None
+
+        if group_type == "affinity":
+            group_name = f"{prefix}-tier"
+            affinity_groups[group_name] = affinity_groups.get(group_name, 0) + 1
+            affinity_group = group_name
+        elif group_type == "anti-affinity":
+            # Create multiple anti-affinity clusters (max 3-5 VMs per cluster)
+            cluster_num = anti_affinity_groups.get(prefix, 0) // 4 + 1
+            group_name = f"{prefix}-cluster-{cluster_num}"
+            anti_affinity_groups[prefix] = anti_affinity_groups.get(prefix, 0) + 1
+            anti_affinity_group = group_name
+
+        # Count VMs with this prefix
+        count = sum(1 for v in vms if v.name.startswith(prefix)) + 1
+
+        vms.append(VM(
+            id=f"vm{vm_id}",
+            name=f"{prefix}-{count:02d}",
+            cpu_cores=cpu,
+            memory_gb=mem,
+            storage_gb=storage,
+            priority=priority,
+            affinity_group=affinity_group,
+            anti_affinity_group=anti_affinity_group
+        ))
+        vm_id += 1
+
+    total_servers = rack_count * servers_per_rack
+    return VMPlacementPlan(
+        name=f"CUSTOM ({total_servers} servers, {vm_count} VMs)",
+        servers=servers,
+        vms=vms
+    )
 
 
 def generate_demo_data(demo: DemoData) -> VMPlacementPlan:

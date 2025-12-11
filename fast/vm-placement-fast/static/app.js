@@ -519,10 +519,10 @@ function createServerBlade(server, vmById) {
     }
     blade.append(vmChips);
 
-    // Click handler for details
+    // Click handler for details - pass server ID to get fresh data
     blade.click(function(e) {
         if (!$(e.target).hasClass('vm-chip')) {
-            showServerDetails(server, vmById);
+            showServerDetails(server.id);
         }
     });
 
@@ -672,7 +672,25 @@ function getPriorityBadgeClass(priority) {
     }
 }
 
-function showServerDetails(server, vmById) {
+function showServerDetails(serverId) {
+    // Always get fresh data from loadedPlacement
+    if (!loadedPlacement || !loadedPlacement.servers) {
+        console.error('No placement data available');
+        return;
+    }
+
+    const server = loadedPlacement.servers.find(s => s.id === serverId);
+    if (!server) {
+        console.error('Server not found:', serverId);
+        return;
+    }
+
+    // Build VM lookup from current placement
+    const vmById = {};
+    if (loadedPlacement.vms) {
+        loadedPlacement.vms.forEach(vm => vmById[vm.id] = vm);
+    }
+
     const modal = new bootstrap.Modal("#serverDetailModal");
     const content = $("#serverDetailModalContent");
     $("#serverDetailModalLabel").html(`<i class="fas fa-server me-2"></i>${server.name}`);
@@ -868,6 +886,8 @@ function refreshSolvingButtons(solving) {
         $("#solveButton").hide();
         $("#stopSolvingButton").show();
         $("#solvingSpinner").addClass("active");
+        // Add solving pulse animation to summary card values
+        $(".summary-card .value").addClass("solving-pulse");
         if (autoRefreshIntervalId == null) {
             // 250ms polling for smooth real-time animations
             autoRefreshIntervalId = setInterval(refreshPlacement, 250);
@@ -876,6 +896,8 @@ function refreshSolvingButtons(solving) {
         $("#solveButton").show();
         $("#stopSolvingButton").hide();
         $("#solvingSpinner").removeClass("active");
+        // Remove solving pulse animation
+        $(".summary-card .value").removeClass("solving-pulse");
         if (autoRefreshIntervalId != null) {
             clearInterval(autoRefreshIntervalId);
             autoRefreshIntervalId = null;
