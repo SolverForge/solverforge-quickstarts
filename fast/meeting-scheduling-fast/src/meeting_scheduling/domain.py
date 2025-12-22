@@ -41,7 +41,14 @@ class Room:
     capacity: int
 
 
-# Define RequiredAttendance and PreferredAttendance before Meeting to avoid forward references
+# Define Attendance base class and subclasses before Meeting to avoid forward references
+@dataclass
+class Attendance:
+    id: Annotated[str, PlanningId]
+    person: Person
+    meeting_id: str
+
+
 @dataclass
 class RequiredAttendance:
     id: Annotated[str, PlanningId]
@@ -71,10 +78,12 @@ class Meeting:
         return len(self.required_attendances) + len(self.preferred_attendances)
 
     def add_required_attendant(self, person: Person) -> None:
-        if any(r.person.id == person.id for r in self.required_attendances):
-            raise ValueError(
-                f"The person {person.id} is already assigned to the meeting {self.id}."
-            )
+        person_id = person.id
+        for r in self.required_attendances:
+            if r.person.id == person_id:
+                raise ValueError(
+                    f"The person {person_id} is already assigned to the meeting {self.id}."
+                )
         self.required_attendances.append(
             RequiredAttendance(
                 id=f"{self.id}-{self.get_required_capacity() + 1}",
@@ -84,10 +93,12 @@ class Meeting:
         )
 
     def add_preferred_attendant(self, person: Person) -> None:
-        if any(p.person.id == person.id for p in self.preferred_attendances):
-            raise ValueError(
-                f"The person {person.id} is already assigned to the meeting {self.id}."
-            )
+        person_id = person.id
+        for p in self.preferred_attendances:
+            if p.person.id == person_id:
+                raise ValueError(
+                    f"The person {person_id} is already assigned to the meeting {self.id}."
+                )
         self.preferred_attendances.append(
             PreferredAttendance(
                 id=f"{self.id}-{self.get_required_capacity() + 1}",
@@ -155,6 +166,9 @@ class MeetingSchedule:
     ] = field(default_factory=list)
     preferred_attendances: Annotated[
         List[PreferredAttendance], ProblemFactCollectionProperty
+    ] = field(default_factory=list)
+    attendances: Annotated[
+        List[Attendance], ProblemFactCollectionProperty
     ] = field(default_factory=list)
     meeting_assignments: Annotated[
         List[MeetingAssignment], PlanningEntityCollectionProperty

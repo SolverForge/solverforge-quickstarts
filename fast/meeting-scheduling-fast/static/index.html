@@ -145,5 +145,33 @@
 <script src="https://cdn.jsdelivr.net/npm/vis-timeline@7.7.2/standalone/umd/vis-timeline-graph2d.min.js"
         integrity="sha256-Jy2+UO7rZ2Dgik50z3XrrNpnc5+2PAx9MhL2CicodME=" crossorigin="anonymous"></script>
 <script src="/app.js"></script>
+
+<!-- Meeting Details Modal -->
+<div class="modal fade" id="meetingDetailsModal" tabindex="-1" aria-labelledby="meetingDetailsModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="meetingDetailsModalLabel">Meeting Details</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="meetingDetailsModalContent">
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Score Analysis Modal -->
+<div class="modal fade" id="scoreAnalysisModal" tabindex="-1" aria-labelledby="scoreAnalysisModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="scoreAnalysisModalLabel">Score Analysis <span id="scoreAnalysisScoreLabel"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="scoreAnalysisModalContent">
+      </div>
+    </div>
+  </div>
+</div>
 </body>
 </html>
