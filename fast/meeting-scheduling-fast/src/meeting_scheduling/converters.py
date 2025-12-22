@@ -283,6 +283,22 @@ def model_to_schedule(model: MeetingScheduleModel) -> domain.MeetingSchedule:
         model_to_preferred_attendance(pa) for pa in model.preferred_attendances
     ]
 
+    # Build combined attendances list for room_stability constraint
+    people_lookup = {p.id: p for p in people}
+    attendances = []
+    for ra in required_attendances:
+        attendances.append(domain.Attendance(
+            id=ra.id,
+            person=ra.person,
+            meeting_id=ra.meeting_id,
+        ))
+    for pa in preferred_attendances:
+        attendances.append(domain.Attendance(
+            id=pa.id,
+            person=pa.person,
+            meeting_id=pa.meeting_id,
+        ))
+
     # Handle score
     score = None
     if model.score:
@@ -302,6 +318,7 @@ def model_to_schedule(model: MeetingScheduleModel) -> domain.MeetingSchedule:
         meetings=meetings,
         required_attendances=required_attendances,
         preferred_attendances=preferred_attendances,
+        attendances=attendances,
         meeting_assignments=meeting_assignments,
         score=score,
         solver_status=solver_status,

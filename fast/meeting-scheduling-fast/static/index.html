@@ -3,13 +3,13 @@
 <head>
     <meta content="text/html; charset=UTF-8" http-equiv="Content-Type">
     <meta content="width=device-width, initial-scale=1" name="viewport">
-    <title>Meeting Scheduling - Timefold Solver for Python</title>
+    <title>Meeting Scheduling - SolverForge for Python</title>
 
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/vis-timeline@7.7.2/styles/vis-timeline-graph2d.min.css"
           integrity="sha256-svzNasPg1yR5gvEaRei2jg+n4Pc3sVyMUWeS6xRAh6U=" crossorigin="anonymous">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/css/bootstrap.min.css"/>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"/>
-    <link rel="stylesheet" href="/webjars/timefold/css/timefold-webui.css"/>
+    <link rel="stylesheet" href="/webjars/solverforge/css/solverforge-webui.css"/>
     <style>
         .vis-time-axis .vis-grid.vis-saturday,
         .vis-time-axis .vis-grid.vis-sunday {
@@ -22,10 +22,10 @@
             min-height: 300px;
         }
     </style>
-    <link rel="icon" href="/webjars/timefold/img/timefold-favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/webjars/solverforge/img/solverforge-favicon.svg" type="image/svg+xml">
 </head>
 <body>
-<header id="timefold-auto-header">
+<header id="solverforge-auto-header">
     <!-- Filled in by app.js -->
 </header>
 <div class="tab-content">
@@ -135,15 +135,43 @@
         </div>
     </div>
 </div>
-<footer id="timefold-auto-footer"></footer>
+<footer id="solverforge-auto-footer"></footer>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/2.11.8/umd/popper.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/js/bootstrap.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/js-joda/1.11.0/js-joda.min.js"></script>
-<script src="/webjars/timefold/js/timefold-webui.js"></script>
+<script src="/webjars/solverforge/js/solverforge-webui.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/vis-timeline@7.7.2/standalone/umd/vis-timeline-graph2d.min.js"
         integrity="sha256-Jy2+UO7rZ2Dgik50z3XrrNpnc5+2PAx9MhL2CicodME=" crossorigin="anonymous"></script>
 <script src="/app.js"></script>
+
+<!-- Meeting Details Modal -->
+<div class="modal fade" id="meetingDetailsModal" tabindex="-1" aria-labelledby="meetingDetailsModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="meetingDetailsModalLabel">Meeting Details</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="meetingDetailsModalContent">
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Score Analysis Modal -->
+<div class="modal fade" id="scoreAnalysisModal" tabindex="-1" aria-labelledby="scoreAnalysisModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="scoreAnalysisModalLabel">Score Analysis <span id="scoreAnalysisScoreLabel"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="scoreAnalysisModalContent">
+      </div>
+    </div>
+  </div>
+</div>
 </body>
 </html>

@@ -2,13 +2,12 @@ from solverforge_legacy.solver.score import HardMediumSoftScore
 from pydantic import (
     BaseModel,
     ConfigDict,
-    Field,
     PlainSerializer,
     BeforeValidator,
     ValidationInfo,
 )
 from pydantic.alias_generators import to_camel
-from typing import Annotated, Any
+from typing import Any
 
 
 def make_list_item_validator(key: str):

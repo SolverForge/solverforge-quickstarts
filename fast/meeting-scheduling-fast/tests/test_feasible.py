@@ -1,7 +1,5 @@
 from meeting_scheduling.rest_api import app
-from meeting_scheduling.domain import MeetingSchedule
 from meeting_scheduling.converters import MeetingScheduleModel, model_to_schedule
-from solverforge_legacy.solver.score import HardMediumSoftScore
 
 from fastapi.testclient import TestClient
 from time import sleep
