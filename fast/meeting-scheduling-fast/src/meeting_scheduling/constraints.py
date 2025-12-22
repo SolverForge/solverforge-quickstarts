@@ -6,7 +6,14 @@ from solverforge_legacy.solver.score import (
     Constraint,
 )
 
-from .domain import *
+from .domain import (
+    Attendance,
+    MeetingAssignment,
+    PreferredAttendance,
+    RequiredAttendance,
+    Room,
+    TimeGrain,
+)
 
 
 @constraint_provider
@@ -241,14 +248,18 @@ def required_and_preferred_attendance_conflict(
             ),
         )
         .join(
-            MeetingAssignment,
+            constraint_factory.for_each_including_unassigned(MeetingAssignment).filter(
+                lambda assignment: assignment.starting_time_grain is not None
+            ),
             Joiners.equal(
                 lambda required, preferred: required.meeting_id,
                 lambda assignment: assignment.meeting.id,
             ),
         )
         .join(
-            MeetingAssignment,
+            constraint_factory.for_each_including_unassigned(MeetingAssignment).filter(
+                lambda assignment: assignment.starting_time_grain is not None
+            ),
             Joiners.equal(
                 lambda required, preferred, left_assignment: preferred.meeting_id,
                 lambda assignment: assignment.meeting.id,
@@ -289,14 +300,18 @@ def preferred_attendance_conflict(constraint_factory: ConstraintFactory) -> Cons
             PreferredAttendance, Joiners.equal(lambda attendance: attendance.person)
         )
         .join(
-            MeetingAssignment,
+            constraint_factory.for_each_including_unassigned(MeetingAssignment).filter(
+                lambda assignment: assignment.starting_time_grain is not None
+            ),
             Joiners.equal(
                 lambda left_attendance, right_attendance: left_attendance.meeting_id,
                 lambda assignment: assignment.meeting.id,
             ),
         )
         .join(
-            MeetingAssignment,
+            constraint_factory.for_each_including_unassigned(MeetingAssignment).filter(
+                lambda assignment: assignment.starting_time_grain is not None
+            ),
             Joiners.equal(
                 lambda left_attendance,
                 right_attendance,
@@ -463,74 +478,50 @@ def room_stability(constraint_factory: ConstraintFactory) -> Constraint:
     """
     Soft constraint: Encourages room stability for people attending multiple meetings.
 
-    Penalizes when a person attends meetings in different rooms that are close in time, encouraging room stability.
-    This handles both required and preferred attendees.
-
-    Args:
-        constraint_factory (ConstraintFactory): The constraint factory.
-    Returns:
-        Constraint: The defined constraint.
+    Penalizes when a person attends meetings in different rooms that are close in time.
+    Uses weighted penalty: back-to-back room switches cost more than switches with gaps.
     """
-
-    def create_attendance_stability_stream(attendance_type):
-        return (
-            constraint_factory.for_each(attendance_type)
-            .join(
-                attendance_type,
-                Joiners.equal(
-                    lambda left_attendance: left_attendance.person,
-                    lambda right_attendance: right_attendance.person,
-                ),
-                Joiners.filtering(
-                    lambda left_attendance, right_attendance: left_attendance.meeting_id
-                    != right_attendance.meeting_id
-                ),
-            )
-            .join(
-                MeetingAssignment,
-                Joiners.equal(
-                    lambda left_attendance,
-                    right_attendance: left_attendance.meeting_id,
-                    lambda assignment: assignment.meeting.id,
-                ),
-            )
-            .join(
-                MeetingAssignment,
-                Joiners.equal(
-                    lambda left_attendance,
-                    right_attendance,
-                    left_assignment: right_attendance.meeting_id,
-                    lambda assignment: assignment.meeting.id,
-                ),
-                Joiners.less_than(
-                    lambda left_attendance,
-                    right_attendance,
-                    left_assignment: left_assignment.get_grain_index(),
-                    lambda assignment: assignment.get_grain_index(),
-                ),
-                Joiners.filtering(
-                    lambda left_attendance,
-                    right_attendance,
-                    left_assignment,
-                    right_assignment: left_assignment.room != right_assignment.room
-                ),
-                Joiners.filtering(
-                    lambda left_attendance,
-                    right_attendance,
-                    left_assignment,
-                    right_assignment: right_assignment.get_grain_index()
-                    - left_assignment.meeting.duration_in_grains
-                    - left_assignment.get_grain_index()
-                    <= 2
-                ),
-            )
-            .penalize(HardMediumSoftScore.ONE_SOFT)
+    return (
+        constraint_factory.for_each(Attendance)
+        .join(
+            Attendance,
+            Joiners.equal(lambda a: a.person),
+            Joiners.filtering(lambda left, right: left.meeting_id != right.meeting_id),
         )
-
-    # Combine both required and preferred attendance stability
-    # Note: Since Python Timefold doesn't have constraint combining like Java,
-    # we'll use the required attendance version as the primary one
-    # TODO: In a full implementation, both streams would need to be properly combined
-    return create_attendance_stability_stream(RequiredAttendance).as_constraint(
-        "Room stability"
+        .join(
+            MeetingAssignment,
+            Joiners.equal(
+                lambda left, right: left.meeting_id,
+                lambda assignment: assignment.meeting.id,
+            ),
+        )
+        .join(
+            MeetingAssignment,
+            Joiners.equal(
+                lambda left, right, left_assignment: right.meeting_id,
+                lambda assignment: assignment.meeting.id,
+            ),
+            Joiners.less_than(
+                lambda left, right, left_assignment: left_assignment.get_grain_index(),
+                lambda assignment: assignment.get_grain_index(),
+            ),
+            Joiners.filtering(
+                lambda left, right, left_assignment, right_assignment: left_assignment.room != right_assignment.room
+            ),
+            Joiners.filtering(
+                lambda left, right, left_assignment, right_assignment: right_assignment.get_grain_index()
+                - left_assignment.meeting.duration_in_grains
+                - left_assignment.get_grain_index()
+                <= 2
+            ),
+        )
+        .penalize(
+            HardMediumSoftScore.ONE_SOFT,
+            lambda left, right, left_assignment, right_assignment: 3 - (
+                right_assignment.get_grain_index()
+                - left_assignment.meeting.duration_in_grains
+                - left_assignment.get_grain_index()
+            ),
+        )
+        .as_constraint("Room stability")
     )
