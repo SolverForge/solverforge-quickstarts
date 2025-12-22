@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Maintenance Scheduling - SolverForge for Python</title>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/vis-timeline@7.7.2/styles/vis-timeline-graph2d.min.css"
+          integrity="sha256-svzNasPg1yR5gvEaRei2jg+n4Pc3sVyMUWeS6xRAh6U=" crossorigin="anonymous">
+    <link rel="stylesheet" href="/webjars/solverforge/css/solverforge-webui.css"/>
+    <link rel="icon" href="/webjars/solverforge/img/solverforge-favicon.svg" type="image/svg+xml">
+    <style>
+        /* Weekend highlighting */
+        .vis-time-axis .vis-grid.vis-saturday,
+        .vis-time-axis .vis-grid.vis-sunday {
+            background: #D3D7CFFF;
+        }
+
+        /* Solving spinner animation */
+        #solvingSpinner {
+            display: none;
+            width: 1.25rem;
+            height: 1.25rem;
+            border: 2px solid #10b981;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.75s linear infinite;
+            vertical-align: middle;
+        }
+        #solvingSpinner.active {
+            display: inline-block;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Button hover effects */
+        .btn {
+            transition: all 0.2s ease;
+        }
+        #solveButton:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+        }
+        #stopSolvingButton:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
+        }
+
+        /* Unassigned job cards */
+        #unassignedJobs .card {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            border-left: 4px solid #ef4444;
+        }
+        #unassignedJobs .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
+        }
+
+        /* Crew table styling */
+        #crewTable tbody tr.crew-row {
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+        #crewTable tbody tr.crew-row:hover {
+            background-color: rgba(99, 102, 241, 0.1);
+        }
+        #crewTable tbody tr.crew-row.table-active {
+            background-color: rgba(99, 102, 241, 0.15) !important;
+        }
+        .crew-color-indicator {
+            width: 1.5rem;
+            height: 1.5rem;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .crew-color-indicator i {
+            color: white;
+            font-size: 0.65rem;
+        }
+
+        /* Timeline styling */
+        .vis-item .vis-item-content {
+            font-size: 0.85rem;
+            padding: 2px 4px;
+        }
+        .vis-labelset .vis-label {
+            padding: 4px 8px;
+        }
+        .vis-item:not(.vis-background) {
+            cursor: pointer;
+        }
+        .vis-item:not(.vis-background):hover {
+            filter: brightness(1.05);
+        }
+
+        /* Score analysis table hover */
+        #scoreAnalysisModalContent .table tbody tr {
+            transition: background-color 0.15s ease;
+        }
+        #scoreAnalysisModalContent .table tbody tr:hover {
+            background-color: rgba(99, 102, 241, 0.08);
+        }
+
+        /* Score display styling */
+        .score {
+            color: #1f2937;
+        }
+    </style>
+</head>
+
+<body>
+<header id="solverforge-auto-header">
+    <!-- Filled in by app.js -->
+</header>
+<div class="tab-content">
+
+    <div id="demo" class="tab-pane fade show active container-fluid">
+    <div class="sticky-top d-flex justify-content-center align-items-center" aria-live="polite" aria-atomic="true">
+        <div id="notificationPanel" style="position: absolute; top: .5rem;"></div>
+    </div>
+    <h1>Road maintenance schedule solver</h1>
+    <p>Generate the optimal schedule for your maintenance staff.</p>
+
+    <div class="mb-2">
+        <button id="solveButton" type="button" class="btn btn-success">
+            <span class="fas fa-play"></span> Solve
+        </button>
+        <button id="stopSolvingButton" type="button" class="btn btn-danger">
+            <span class="fas fa-stop"></span> Stop solving
+        </button>
+        <span id="solvingSpinner" class="ms-2"></span>
+        <span id="score" class="score ms-2 align-middle fw-bold">Score: ?</span>
+        <button id="analyzeButton" type="button" class="ms-2 btn btn-secondary">
+            <span class="fas fa-question"></span>
+        </button>
+
+        <div class="float-end">
+            <ul class="nav nav-pills" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="byCrewTab" data-bs-toggle="tab" data-bs-target="#byCrewPanel" type="button" role="tab" aria-controls="byCrewPanel" aria-selected="true">By crew</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="byJobTab" data-bs-toggle="tab" data-bs-target="#byJobPanel" type="button" role="tab" aria-controls="byJobPanel" aria-selected="false">By job</button>
+                </li>
+            </ul>
+        </div>
+    </div>
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <h5>Crews <small class="text-muted"><i class="fas fa-hand-pointer"></i> Click to highlight</small></h5>
+            <table class="table table-sm" id="crewTable">
+                <thead>
+                    <tr>
+                        <th style="width: 2rem;"></th>
+                        <th>Crew</th>
+                        <th>Jobs</th>
+                        <th>Days</th>
+                        <th style="width: 2.5rem;"></th>
+                    </tr>
+                </thead>
+                <tbody id="crewTableBody"></tbody>
+            </table>
+        </div>
+        <div class="col-md-9">
+            <div class="tab-content">
+                <div class="tab-pane fade show active" id="byCrewPanel" role="tabpanel" aria-labelledby="byCrewTab">
+                </div>
+                <div class="tab-pane fade" id="byJobPanel" role="tabpanel" aria-labelledby="byJobTab">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <h2>Unassigned jobs</h2>
+    <div id="unassignedJobs" class="row row-cols-3 g-3 mb-4"></div>
+</div>
+
+    <div id="rest" class="tab-pane fade  container-fluid">
+        <h1>REST API Guide</h1>
+
+        <h2>Maintenance Scheduling solver integration via cURL</h2>
+
+        <h3>1. Download demo data</h3>
+        <pre>
+            <button class="btn btn-outline-dark btn-sm float-end"
+                    onclick="copyTextToClipboard('curl1')">Copy</button>
+            <code id="curl1">curl -X GET -H 'Accept:application/json' http://localhost:8080/demo-data/SMALL -o sample.json</code>
+    </pre>
+
+        <h3>2. Post the sample data for solving</h3>
+        <p>The POST operation returns a <code>jobId</code> that should be used in subsequent commands.</p>
+        <pre>
+            <button class="btn btn-outline-dark btn-sm float-end"
+                    onclick="copyTextToClipboard('curl2')">Copy</button>
+            <code id="curl2">curl -X POST -H 'Content-Type:application/json' http://localhost:8080/schedules -d@sample.json</code>
+    </pre>
+
+        <h3>3. Get the current status and score</h3>
+        <pre>
+            <button class="btn btn-outline-dark btn-sm float-end"
+                    onclick="copyTextToClipboard('curl3')">Copy</button>
+            <code id="curl3">curl -X GET -H 'Accept:application/json' http://localhost:8080/schedules/{jobId}/status</code>
+    </pre>
+
+        <h3>4. Get the complete solution</h3>
+        <pre>
+            <button class="btn btn-outline-dark btn-sm float-end"
+                    onclick="copyTextToClipboard('curl4')">Copy</button>
+            <code id="curl4">curl -X GET -H 'Accept:application/json' http://localhost:8080/schedules/{jobId}</code>
+    </pre>
+
+        <h3>5. Fetch the analysis of the solution</h3>
+        <pre>
+            <button class="btn btn-outline-dark btn-sm float-end"
+                    onclick="copyTextToClipboard('curl5')">Copy</button>
+            <code id="curl5">curl -X PUT -H 'Content-Type:application/json' http://localhost:8080/schedules/analyze -d@solution.json</code>
+    </pre>
+
+        <h3>6. Terminate solving early</h3>
+        <pre>
+            <button class="btn btn-outline-dark btn-sm float-end"
+                    onclick="copyTextToClipboard('curl6')">Copy</button>
+            <code id="curl6">curl -X DELETE -H 'Accept:application/json' http://localhost:8080/schedules/{jobId}</code>
+    </pre>
+    </div>
+
+    <div id="openapi" class="tab-pane fade container-fluid">
+        <h1>REST API Reference</h1>
+        <div class="ratio ratio-1x1">
+            <!-- "scrolling" attribute is obsolete, but e.g. Chrome does not support "overflow:hidden" -->
+            <iframe src="/q/swagger-ui" style="overflow:hidden;" scrolling="no"></iframe>
+        </div>
+    </div>
+</div>
+<footer id="solverforge-auto-footer"></footer>
+<div class="modal fadebd-example-modal-lg" id="scoreAnalysisModal" tabindex="-1"
+     aria-labelledby="scoreAnalysisModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="scoreAnalysisModalLabel">Score analysis <span
+                        id="scoreAnalysisScoreLabel"></span></h1>
+
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="scoreAnalysisModalContent">
+                <!-- Filled in by app.js -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Job Details Modal -->
+<div class="modal fade" id="jobDetailsModal" tabindex="-1" aria-labelledby="jobDetailsModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="jobDetailsModalLabel">
+                    <i class="fas fa-wrench me-2"></i><span id="jobDetailsName"></span>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row mb-3">
+                    <div class="col-6">
+                        <small class="text-muted">Assigned Crew</small>
+                        <div id="jobDetailsCrew" class="fw-bold"></div>
+                    </div>
+                    <div class="col-6">
+                        <small class="text-muted">Duration</small>
+                        <div id="jobDetailsDuration" class="fw-bold"></div>
+                    </div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-6">
+                        <small class="text-muted">Ready Date</small>
+                        <div id="jobDetailsMinStart"></div>
+                    </div>
+                    <div class="col-6">
+                        <small class="text-muted">Due Date</small>
+                        <div id="jobDetailsMaxEnd"></div>
+                    </div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-6">
+                        <small class="text-muted">Ideal End Date</small>
+                        <div id="jobDetailsIdealEnd"></div>
+                    </div>
+                    <div class="col-6">
+                        <small class="text-muted">Scheduled</small>
+                        <div id="jobDetailsScheduled"></div>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <small class="text-muted">Tags</small>
+                    <div id="jobDetailsTags"></div>
+                </div>
+                <div id="jobDetailsStatus" class="alert mb-0" style="display: none;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Crew Details Modal -->
+<div class="modal fade" id="crewDetailsModal" tabindex="-1" aria-labelledby="crewDetailsModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="crewDetailsModalLabel">
+                    <i class="fas fa-hard-hat me-2"></i><span id="crewDetailsName"></span>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row mb-3">
+                    <div class="col-6">
+                        <small class="text-muted">Assigned Jobs</small>
+                        <div id="crewDetailsJobCount" class="fw-bold fs-4"></div>
+                    </div>
+                    <div class="col-6">
+                        <small class="text-muted">Total Workdays</small>
+                        <div id="crewDetailsWorkdays" class="fw-bold fs-4"></div>
+                    </div>
+                </div>
+                <h6>Assigned Jobs</h6>
+                <div id="crewDetailsJobList" class="list-group list-group-flush"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@js-joda/core@5.6.3/dist/js-joda.min.js"></script>
+<script src="/webjars/solverforge/js/solverforge-webui.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vis-timeline@7.7.2/standalone/umd/vis-timeline-graph2d.min.js"
+        integrity="sha256-Jy2+UO7rZ2Dgik50z3XrrNpnc5+2PAx9MhL2CicodME=" crossorigin="anonymous"></script>
+<script src="/score-analysis.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
