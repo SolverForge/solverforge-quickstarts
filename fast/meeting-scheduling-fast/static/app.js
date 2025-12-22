@@ -251,26 +251,20 @@ function extractAssignmentIds(justification, schedule) {
         }
     }
 
-    console.log("Facts:", justification.facts);
-    console.log("meetingToAssignment:", [...meetingToAssignment.entries()]);
-
     for (const fact of justification.facts) {
         if (fact.type === 'assignment' && fact.id) {
             ids.add(fact.id);
         } else if (fact.type === 'attendance' && fact.meetingId) {
             const assignmentId = meetingToAssignment.get(fact.meetingId);
-            console.log(`attendance fact meetingId=${fact.meetingId} -> assignmentId=${assignmentId}`);
             if (assignmentId) ids.add(assignmentId);
         }
     }
-    console.log("Extracted IDs:", [...ids]);
     return [...ids];
 }
 
 
 function getConflictStatus(assignmentId) {
     // Use solver's constraint analysis if available (per-assignment violations)
-    console.log(`getConflictStatus(${assignmentId}), cache has it: ${analyzeCache?.has(assignmentId)}, cache has string: ${analyzeCache?.has(String(assignmentId))}`);
     if (analyzeCache && analyzeCache.has(assignmentId)) {
         const violations = analyzeCache.get(assignmentId);
 
@@ -500,7 +494,7 @@ function renderScheduleByRoom(schedule) {
             const startTime = JSJoda.LocalTime.of(0, 0, 0, 0)
                 .plusMinutes((timeGrain.startingMinuteOfDay ?? timeGrain.starting_minute_of_day));
             const startDateTime = JSJoda.LocalDateTime.of(startDate, startTime);
-            const endDateTime = startDateTime.plusMinutes((meet.durationInGrains ?? meet.duration_in_grains) * 15);
+            const endDateTime = startTime.plusMinutes((meet.durationInGrains ?? meet.duration_in_grains) * 15);
             byRoomItemData.add({
                 id: assignment.id,
                 group: typeof room === 'string' ? room : room.id,
@@ -609,7 +603,7 @@ function renderScheduleByPerson(schedule) {
             const startTime = JSJoda.LocalTime.of(0, 0, 0, 0)
                 .plusMinutes((timeGrain.startingMinuteOfDay ?? timeGrain.starting_minute_of_day));
             const startDateTime = JSJoda.LocalDateTime.of(startDate, startTime);
-            const endDateTime = startDateTime.plusMinutes((meet.durationInGrains ?? meet.duration_in_grains) * 15);
+            const endDateTime = startTime.plusMinutes((meet.durationInGrains ?? meet.duration_in_grains) * 15);
             meet.requiredAttendances.forEach(attendance => {
                 const byPersonElement = $("<div />")
                     .append($("<div class='d-flex justify-content-center align-items-center' />")
@@ -823,7 +817,7 @@ function showMeetingDetails(assignmentId) {
     $("#meetingDetailsModalLabel").text("Meeting Details: " + meeting.topic);
 
     // Show modal
-    bootstrap.Modal.getOrCreateInstance(document.getElementById("meetingDetailsModal")).show();
+    new bootstrap.Modal("#meetingDetailsModal").show();
 }
 
 
@@ -845,7 +839,7 @@ function solve() {
 
 
 function analyze() {
-    bootstrap.Modal.getOrCreateInstance(document.getElementById("scoreAnalysisModal")).show();
+    new bootstrap.Modal("#scoreAnalysisModal").show()
     const scoreAnalysisModalContent = $("#scoreAnalysisModalContent");
     scoreAnalysisModalContent.children().remove();
     if (loadedSchedule.score == null) {
