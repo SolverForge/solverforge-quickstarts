@@ -20,8 +20,14 @@ data_sets: Dict[str, MeetingSchedule] = {}
 
 
 @app.get("/demo-data")
-async def get_demo_data() -> MeetingScheduleModel:
-    """Get the demo data set (always the same)."""
+async def list_demo_data() -> List[str]:
+    """List available demo data sets."""
+    return ["SMALL", "MEDIUM", "LARGE"]
+
+
+@app.get("/demo-data/{dataset_id}")
+async def get_demo_data(dataset_id: str) -> MeetingScheduleModel:
+    """Get a demo data set by ID."""
     domain_schedule = generate_demo_data()
     return schedule_to_model(domain_schedule)
 
@@ -115,6 +121,25 @@ async def analyze_schedule(request: Request) -> Dict:
 
     analysis = solution_manager.analyze(domain_schedule)
 
+    def serialize_justification(justification):
+        """Convert justification facts to serializable dicts."""
+        if justification is None:
+            return None
+        facts = []
+        for fact in getattr(justification, 'facts', []):
+            fact_dict = {'id': getattr(fact, 'id', None)}
+            # MeetingAssignment - has meeting attribute
+            if hasattr(fact, 'meeting'):
+                fact_dict['type'] = 'assignment'
+                fact_dict['meeting'] = getattr(fact.meeting, 'id', None) if fact.meeting else None
+            # RequiredAttendance/PreferredAttendance - has person and meeting_id
+            elif hasattr(fact, 'person') and hasattr(fact, 'meeting_id'):
+                fact_dict['type'] = 'attendance'
+                fact_dict['personId'] = getattr(fact.person, 'id', None) if fact.person else None
+                fact_dict['meetingId'] = fact.meeting_id
+            facts.append(fact_dict)
+        return {'facts': facts}
+
     # Convert to proper DTOs for correct serialization
     constraints = []
     for constraint in analysis.constraint_analyses:
@@ -122,7 +147,7 @@ async def analyze_schedule(request: Request) -> Dict:
             MatchAnalysisDTO(
                 name=match.constraint_ref.constraint_name,
                 score=match.score,
-                justification=match.justification,
+                justification=serialize_justification(match.justification),
             )
             for match in constraint.matches
         ]
