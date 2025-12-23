@@ -250,11 +250,17 @@ async def stop_solving(problem_id: str) -> Dict[str, Any]:
 @app.get("/schedules/{problem_id}/score-analysis")
 async def analyze_score(problem_id: str) -> dict:
     """Get score analysis for current solution."""
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
     solution = data_sets.get(problem_id)
     if not solution:
         raise HTTPException(status_code=404, detail="Solution not found")
 
-    analysis = solution_manager.analyze(solution)
+    # Run blocking JPype call in thread pool to not block async event loop
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor() as pool:
+        analysis = await loop.run_in_executor(pool, solution_manager.analyze, solution)
     constraints = []
     for constraint in getattr(analysis, 'constraint_analyses', []) or []:
         matches = [
