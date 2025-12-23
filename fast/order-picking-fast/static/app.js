@@ -527,6 +527,10 @@ function analyze() {
         return;
     }
 
+    // Show loading state
+    const btn = $("#analyzeButton");
+    btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i>');
+
     fetch(`/schedules/${currentProblemId}/score-analysis`)
         .then(r => r.json())
         .then(analysis => {
@@ -534,6 +538,9 @@ function analyze() {
         })
         .catch(error => {
             showError("Failed to load score analysis", error);
+        })
+        .finally(() => {
+            btn.prop('disabled', false).html('<i class="fas fa-chart-bar"></i>');
         });
 }
 
