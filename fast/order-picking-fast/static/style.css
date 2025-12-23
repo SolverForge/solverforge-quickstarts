@@ -96,6 +96,14 @@ body {
     flex: 0 0 auto;
 }
 
+.header-left h1 {
+    font-size: 1.75rem;
+    font-weight: 600;
+    color: var(--gray-800);
+    margin: 0;
+    letter-spacing: -0.02em;
+}
+
 .app-title {
     font-size: 1.5rem;
     font-weight: 700;

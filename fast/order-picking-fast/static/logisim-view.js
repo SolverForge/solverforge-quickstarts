@@ -60,6 +60,9 @@ const ISO = {
     height: 0,
     originX: 0,
     originY: 0,
+    // Grid offset to center the warehouse
+    gridOffsetX: 0,
+    gridOffsetY: 0,
 };
 
 // Column/Row mapping
@@ -70,8 +73,11 @@ const ROWS = ['1', '2', '3'];
  * Convert isometric coordinates to screen coordinates
  */
 function isoToScreen(x, y, z = 0) {
-    const screenX = ISO.originX + (x - y) * (ISO.TILE_WIDTH / 2);
-    const screenY = ISO.originY + (x + y) * (ISO.TILE_HEIGHT / 2) - z * ISO.TILE_HEIGHT;
+    // Apply grid offset to center the warehouse
+    const centeredX = x - ISO.gridOffsetX;
+    const centeredY = y - ISO.gridOffsetY;
+    const screenX = ISO.originX + (centeredX - centeredY) * (ISO.TILE_WIDTH / 2);
+    const screenY = ISO.originY + (centeredX + centeredY) * (ISO.TILE_HEIGHT / 2) - z * ISO.TILE_HEIGHT;
     return { x: screenX, y: screenY };
 }
 
@@ -117,9 +123,15 @@ function initWarehouseCanvas() {
 
     ISO.ctx.scale(ISO.dpr, ISO.dpr);
 
-    // Set origin point (top-center of warehouse)
+    // Calculate grid center offset for centering
+    const gridSize = ISO.COLS * (ISO.SHELF_WIDTH + ISO.AISLE_WIDTH) + ISO.AISLE_WIDTH;
+    const gridDepth = ISO.ROWS * (ISO.SHELF_DEPTH + ISO.AISLE_WIDTH) + ISO.AISLE_WIDTH;
+    ISO.gridOffsetX = gridSize / 2;
+    ISO.gridOffsetY = gridDepth / 2;
+
+    // Set origin point (center of canvas)
     ISO.originX = ISO.width / 2;
-    ISO.originY = 80;
+    ISO.originY = ISO.height / 2 - 50; // Slightly above center
 }
 
 /**
@@ -361,9 +373,10 @@ function darkenColor(hex, percent) {
 
 /**
  * Convert warehouse location to grid position
+ * Returns position in aisle next to the shelf
  */
 function locationToGrid(location) {
-    if (!location) return { x: 0, y: 0 };
+    if (!location) return { x: 1, y: 1 };
 
     // Parse shelving ID like "(A, 1)"
     const shelvingId = location.shelvingId || '';
@@ -375,49 +388,142 @@ function locationToGrid(location) {
         row = parseInt(match[2]) - 1;
     }
 
-    // Calculate grid position (center of aisle next to shelf)
-    const gridX = ISO.AISLE_WIDTH + col * (ISO.SHELF_WIDTH + ISO.AISLE_WIDTH) + ISO.SHELF_WIDTH / 2;
-    const gridY = ISO.AISLE_WIDTH + row * (ISO.SHELF_DEPTH + ISO.AISLE_WIDTH) + ISO.SHELF_DEPTH + 0.5;
+    // Calculate shelf's grid position
+    const shelfGridX = ISO.AISLE_WIDTH + col * (ISO.SHELF_WIDTH + ISO.AISLE_WIDTH);
+    const shelfGridY = ISO.AISLE_WIDTH + row * (ISO.SHELF_DEPTH + ISO.AISLE_WIDTH);
 
-    // Adjust for side (LEFT/RIGHT)
+    // Position in the aisle in front of the shelf (below it in grid terms)
+    const aisleY = shelfGridY + ISO.SHELF_DEPTH + 0.5;
+
+    // Adjust X for side (LEFT/RIGHT of shelf)
     const side = location.side;
+    let gridX;
     if (side === 'LEFT') {
-        return { x: gridX - 1, y: gridY };
+        gridX = shelfGridX - 0.5; // Left aisle
     } else {
-        return { x: gridX + 1, y: gridY };
+        gridX = shelfGridX + ISO.SHELF_WIDTH + 0.5; // Right aisle
     }
+
+    return { x: gridX, y: aisleY };
 }
 
 /**
- * Build trolley path from steps
+ * Get the main aisle Y position (horizontal corridor)
  */
-function buildTrolleyPath(trolley, steps) {
-    const path = [];
+function getMainAisleY() {
+    // Main aisle runs at the bottom of the warehouse
+    return (ISO.ROWS * (ISO.SHELF_DEPTH + ISO.AISLE_WIDTH)) + ISO.AISLE_WIDTH + 0.5;
+}
 
-    // Start position
-    if (trolley.location) {
-        path.push(locationToGrid(trolley.location));
+/**
+ * Get vertical aisle X positions (between shelves)
+ */
+function getVerticalAisleX(col) {
+    // Aisle to the left of column 'col'
+    return ISO.AISLE_WIDTH + col * (ISO.SHELF_WIDTH + ISO.AISLE_WIDTH) - 0.5;
+}
+
+/**
+ * Build a path that follows aisles from start to end
+ * Uses a simple strategy: go to main aisle, traverse horizontally, go up to destination
+ */
+function buildAislePath(start, end) {
+    const path = [start];
+
+    // If start and end are very close, just go directly
+    const dx = Math.abs(start.x - end.x);
+    const dy = Math.abs(start.y - end.y);
+    if (dx < 2 && dy < 2) {
+        path.push(end);
+        return path;
     }
 
-    // Add each step location
-    for (const step of steps) {
-        if (step.orderItem && step.orderItem.product && step.orderItem.product.location) {
-            path.push(locationToGrid(step.orderItem.product.location));
-        }
+    const mainAisleY = getMainAisleY();
+
+    // Strategy: go down to main aisle (or near it), traverse, then go up
+    // First, go to the nearest vertical aisle
+    const startAisleY = Math.max(start.y, mainAisleY - 1);
+    const endAisleY = Math.max(end.y, mainAisleY - 1);
+
+    // Move to horizontal travel position
+    if (Math.abs(start.y - startAisleY) > 0.5) {
+        path.push({ x: start.x, y: startAisleY });
     }
 
-    // Return to start
-    if (path.length > 1 && trolley.location) {
-        path.push(locationToGrid(trolley.location));
+    // Move horizontally to align with destination column
+    if (Math.abs(start.x - end.x) > 0.5) {
+        path.push({ x: end.x, y: startAisleY });
+    }
+
+    // Move vertically to destination
+    if (Math.abs(path[path.length - 1].y - end.y) > 0.5) {
+        path.push({ x: end.x, y: end.y });
+    }
+
+    // Add final destination if different from last point
+    const last = path[path.length - 1];
+    if (Math.abs(last.x - end.x) > 0.1 || Math.abs(last.y - end.y) > 0.1) {
+        path.push(end);
     }
 
     return path;
 }
 
 /**
+ * Build trolley path from steps with proper aisle routing
+ * Returns { path: [], pickupIndices: [] }
+ */
+function buildTrolleyPath(trolley, steps) {
+    const waypoints = [];
+    const waypointTypes = []; // 'start', 'pickup', 'end'
+
+    // Start position
+    if (trolley.location) {
+        waypoints.push(locationToGrid(trolley.location));
+        waypointTypes.push('start');
+    }
+
+    // Add each step location
+    for (const step of steps) {
+        if (step.orderItem && step.orderItem.product && step.orderItem.product.location) {
+            waypoints.push(locationToGrid(step.orderItem.product.location));
+            waypointTypes.push('pickup');
+        }
+    }
+
+    // Return to start
+    if (waypoints.length > 1 && trolley.location) {
+        waypoints.push(locationToGrid(trolley.location));
+        waypointTypes.push('end');
+    }
+
+    if (waypoints.length <= 1) {
+        return { path: waypoints, pickupIndices: [] };
+    }
+
+    // Build full path with aisle routing between each waypoint
+    const fullPath = [waypoints[0]];
+    const pickupIndices = [];
+
+    for (let i = 1; i < waypoints.length; i++) {
+        const segmentPath = buildAislePath(waypoints[i - 1], waypoints[i]);
+        // Skip first point (it's the same as last point of previous segment)
+        for (let j = 1; j < segmentPath.length; j++) {
+            fullPath.push(segmentPath[j]);
+        }
+        // Track pickup point index
+        if (waypointTypes[i] === 'pickup') {
+            pickupIndices.push(fullPath.length - 1);
+        }
+    }
+
+    return { path: fullPath, pickupIndices: pickupIndices };
+}
+
+/**
  * Draw trolley path
  */
-function drawPath(path, color, active = false) {
+function drawPath(path, color, pickupIndices, active = false) {
     if (path.length < 2) return;
 
     const ctx = ISO.ctx;
@@ -437,23 +543,27 @@ function drawPath(path, color, active = false) {
     ctx.lineJoin = 'round';
     ctx.stroke();
 
-    // Draw pickup markers
-    for (let i = 1; i < path.length - 1; i++) {
-        const point = isoToScreen(path[i].x, path[i].y, 0.5);
+    // Draw pickup markers only at actual pickup points
+    let pickupNum = 1;
+    for (const idx of pickupIndices) {
+        if (idx >= 0 && idx < path.length) {
+            const point = isoToScreen(path[idx].x, path[idx].y, 0.5);
 
-        ctx.beginPath();
-        ctx.arc(point.x, point.y, 8, 0, Math.PI * 2);
-        ctx.fillStyle = color;
-        ctx.fill();
-        ctx.strokeStyle = 'white';
-        ctx.lineWidth = 2;
-        ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(point.x, point.y, 8, 0, Math.PI * 2);
+            ctx.fillStyle = color;
+            ctx.fill();
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 2;
+            ctx.stroke();
 
-        ctx.font = 'bold 9px -apple-system, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = 'white';
-        ctx.fillText(i.toString(), point.x, point.y);
+            ctx.font = 'bold 9px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = 'white';
+            ctx.fillText(pickupNum.toString(), point.x, point.y);
+            pickupNum++;
+        }
     }
 }
 
@@ -461,7 +571,7 @@ function drawPath(path, color, active = false) {
  * Get position along path at progress (0-1)
  */
 function getPositionOnPath(path, progress) {
-    if (path.length === 0) return { x: 0, y: 0 };
+    if (!path || path.length === 0) return { x: 0, y: 0 };
     if (path.length === 1) return path[0];
 
     const totalSegments = path.length - 1;
@@ -471,6 +581,9 @@ function getPositionOnPath(path, progress) {
 
     const start = path[currentSegment];
     const end = path[currentSegment + 1];
+
+    // Safety check for undefined points
+    if (!start || !end) return path[0] || { x: 0, y: 0 };
 
     return {
         x: start.x + (end.x - start.x) * segmentT,
@@ -510,11 +623,13 @@ function renderWarehouse(solution) {
         ).filter(s => s);
 
         const color = getTrolleyColor(trolley.id);
-        const path = buildTrolleyPath(trolley, steps);
+        const pathData = buildTrolleyPath(trolley, steps);
+        const path = pathData.path;
+        const pickupIndices = pathData.pickupIndices;
 
         // Draw path
         if (path.length > 1) {
-            drawPath(path, color, ISO.isSolving);
+            drawPath(path, color, pickupIndices, ISO.isSolving);
         }
 
         // Draw trolley
@@ -539,7 +654,7 @@ function renderWarehouse(solution) {
 }
 
 /**
- * Animation loop
+ * Animation loop - only runs when solving to animate trolley positions
  */
 function animate() {
     if (!ISO.isSolving) {
@@ -547,7 +662,12 @@ function animate() {
         return;
     }
 
-    renderWarehouse(ISO.currentSolution);
+    // Only re-render if we have a valid solution
+    // The animation loop provides smooth trolley movement
+    if (ISO.currentSolution && ISO.currentSolution.trolleys) {
+        renderWarehouse(ISO.currentSolution);
+    }
+
     ISO.animationId = requestAnimationFrame(animate);
 }
 
@@ -566,17 +686,22 @@ function startWarehouseAnimation(solution) {
     }
 
     for (const trolley of solution.trolleys || []) {
-        const steps = (trolley.steps || []).map(ref =>
-            typeof ref === 'string' ? stepLookup.get(ref) : ref
-        ).filter(s => s);
+        // Get step IDs for signature
+        const stepIds = (trolley.steps || []).map(ref =>
+            typeof ref === 'string' ? ref : ref.id
+        );
 
-        const path = buildTrolleyPath(trolley, steps);
-        const duration = Math.max(3000, path.length * 800);
+        const steps = stepIds.map(id => stepLookup.get(id)).filter(s => s);
+
+        const pathData = buildTrolleyPath(trolley, steps);
+        const path = pathData.path;
+        const duration = Math.max(3000, path.length * 400);
 
         ISO.trolleyAnimations.set(trolley.id, {
-            startTime: Date.now() + parseInt(trolley.id) * 300, // Stagger starts
+            startTime: Date.now() + parseInt(trolley.id) * 200,
             duration: duration,
             path: path,
+            stepSignature: stepIds.join(','),  // Track initial signature
         });
     }
 
@@ -589,32 +714,81 @@ function startWarehouseAnimation(solution) {
  * Update animation with new solution data
  */
 function updateWarehouseAnimation(solution) {
+    console.log('[updateWarehouseAnimation] Called with', solution?.trolleys?.length, 'trolleys');
     ISO.currentSolution = solution;
 
-    // Update paths but keep animation timing
+    // Build step lookup for resolving references
     const stepLookup = new Map();
     for (const step of solution.trolleySteps || []) {
         stepLookup.set(step.id, step);
     }
 
-    for (const trolley of solution.trolleys || []) {
-        const steps = (trolley.steps || []).map(ref =>
-            typeof ref === 'string' ? stepLookup.get(ref) : ref
-        ).filter(s => s);
+    let anyPathChanged = false;
 
-        const path = buildTrolleyPath(trolley, steps);
+    for (const trolley of solution.trolleys || []) {
+        // Get step IDs for this trolley (for change detection)
+        const stepIds = (trolley.steps || []).map(ref =>
+            typeof ref === 'string' ? ref : ref.id
+        );
+
+        // Resolve to full step objects
+        const steps = stepIds.map(id => stepLookup.get(id)).filter(s => s);
+
+        const pathData = buildTrolleyPath(trolley, steps);
+        const path = pathData.path;
         const existingAnim = ISO.trolleyAnimations.get(trolley.id);
 
         if (existingAnim) {
+            // Create signature of step assignments to detect any change
+            const oldSignature = existingAnim.stepSignature || '';
+            const newSignature = stepIds.join(',');
+            const pathChanged = oldSignature !== newSignature;
+
+            if (pathChanged) {
+                anyPathChanged = true;
+                console.log(`[PATH CHANGE] Trolley ${trolley.id}:`, {
+                    old: oldSignature.substring(0, 50),
+                    new: newSignature.substring(0, 50),
+                    oldLen: oldSignature.split(',').filter(x=>x).length,
+                    newLen: stepIds.length
+                });
+            }
+
             existingAnim.path = path;
-            existingAnim.duration = Math.max(3000, path.length * 800);
+            existingAnim.stepSignature = newSignature;
+            existingAnim.duration = Math.max(3000, path.length * 400);
+
+            // Reset animation timing when path changes to prevent position jumps
+            if (pathChanged) {
+                existingAnim.startTime = Date.now();
+            }
         } else {
             ISO.trolleyAnimations.set(trolley.id, {
                 startTime: Date.now(),
-                duration: Math.max(3000, path.length * 800),
+                duration: Math.max(3000, path.length * 400),
                 path: path,
+                stepSignature: stepIds.join(','),
             });
+            anyPathChanged = true;
         }
+    }
+
+    // Visual feedback when paths change
+    if (anyPathChanged) {
+        console.log('[RENDER] Paths changed, forcing immediate render');
+        // Flash the canvas border to indicate update
+        if (ISO.canvas) {
+            ISO.canvas.style.outline = '3px solid #10b981';
+            setTimeout(() => { ISO.canvas.style.outline = 'none'; }, 200);
+        }
+    }
+
+    // Force immediate render with updated paths
+    renderWarehouse(solution);
+
+    // Restart animation loop if it died
+    if (ISO.isSolving && !ISO.animationId) {
+        animate();
     }
 }
 
