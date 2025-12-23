@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Order Picking - SolverForge</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/css/bootstrap.min.css"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"/>
+    <link rel="stylesheet" href="/webjars/solverforge/css/solverforge-webui.css"/>
+    <link rel="stylesheet" href="/style.css"/>
+    <link rel="icon" href="/webjars/solverforge/img/solverforge-favicon.svg" type="image/svg+xml">
+</head>
+<body>
+<header id="solverforge-auto-header"></header>
+
+<div class="container-fluid main-container">
+    <!-- Notification Area -->
+    <div class="notification-area">
+        <div id="notificationPanel"></div>
+    </div>
+
+    <!-- Header Bar -->
+    <div class="header-bar">
+        <div class="header-left">
+            <h1>Order Picking</h1>
+        </div>
+        <div class="header-center">
+            <button id="solveButton" class="btn btn-solve">
+                <i class="fas fa-play"></i> Solve
+            </button>
+            <button id="stopSolvingButton" class="btn btn-stop" style="display: none">
+                <i class="fas fa-stop"></i> Stop
+            </button>
+            <div id="scoreDisplay" class="score-display">
+                <span class="score-label">Score</span>
+                <span id="score" class="score-value">?</span>
+            </div>
+            <div id="solvingIndicator" class="solving-indicator" style="display: none">
+                <div class="solving-spinner"></div>
+                <span>Optimizing...</span>
+            </div>
+        </div>
+        <div class="header-right">
+            <button id="settingsToggle" class="btn btn-settings" data-bs-toggle="collapse" data-bs-target="#settingsPanel">
+                <i class="fas fa-sliders-h"></i>
+            </button>
+            <button id="analyzeButton" class="btn btn-analyze">
+                <i class="fas fa-chart-bar"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Settings Panel (Collapsible) -->
+    <div class="collapse" id="settingsPanel">
+        <div class="settings-panel">
+            <div class="settings-grid">
+                <div class="setting-item">
+                    <label>
+                        <i class="fas fa-shopping-cart"></i> Orders
+                        <span class="badge" id="ordersCountValue">40</span>
+                    </label>
+                    <input type="range" id="ordersCountSlider" min="10" max="100" value="40">
+                </div>
+                <div class="setting-item">
+                    <label>
+                        <i class="fas fa-dolly"></i> Trolleys
+                        <span class="badge" id="trolleysCountValue">8</span>
+                    </label>
+                    <input type="range" id="trolleysCountSlider" min="3" max="15" value="8">
+                </div>
+                <div class="setting-item">
+                    <label>
+                        <i class="fas fa-box"></i> Buckets
+                        <span class="badge" id="bucketsCountValue">6</span>
+                    </label>
+                    <input type="range" id="bucketsCountSlider" min="2" max="10" value="6">
+                </div>
+                <div class="setting-item">
+                    <button id="generateButton" class="btn btn-generate">
+                        <i class="fas fa-sync-alt"></i> Generate New
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="content-area">
+        <!-- Stats Cards -->
+        <div class="stats-sidebar">
+            <div class="stat-card" id="ordersCard">
+                <div class="stat-icon"><i class="fas fa-clipboard-list"></i></div>
+                <div class="stat-info">
+                    <span class="stat-value" id="totalOrders">0</span>
+                    <span class="stat-label">Orders</span>
+                </div>
+            </div>
+            <div class="stat-card" id="itemsCard">
+                <div class="stat-icon"><i class="fas fa-cube"></i></div>
+                <div class="stat-info">
+                    <span class="stat-value" id="totalItems">0</span>
+                    <span class="stat-label">Items</span>
+                </div>
+            </div>
+            <div class="stat-card" id="trolleysCard">
+                <div class="stat-icon"><i class="fas fa-dolly"></i></div>
+                <div class="stat-info">
+                    <span class="stat-value" id="activeTrolleys">0</span>
+                    <span class="stat-label">Active</span>
+                </div>
+            </div>
+            <div class="stat-card" id="distanceCard">
+                <div class="stat-icon"><i class="fas fa-route"></i></div>
+                <div class="stat-info">
+                    <span class="stat-value" id="totalDistance">0</span>
+                    <span class="stat-label">meters</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Canvas Area -->
+        <div class="canvas-area">
+            <div id="warehouseContainer">
+                <canvas id="warehouseCanvas"></canvas>
+                <!-- Legend Overlay -->
+                <div id="legendOverlay">
+                    <div class="legend-header">
+                        <i class="fas fa-dolly"></i> Trolleys
+                    </div>
+                    <div id="trolleyLegend">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Trolley Cards Section -->
+    <div class="trolley-section">
+        <div class="section-header">
+            <h2><i class="fas fa-tasks"></i> Picking Plan</h2>
+        </div>
+        <div id="trolleyCardsContainer" class="trolley-cards-grid">
+            <!-- Populated by JS -->
+        </div>
+    </div>
+</div>
+
+<!-- Score Analysis Modal -->
+<div class="modal fade" id="scoreAnalysisModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-chart-bar"></i> Score Analysis
+                    <span id="scoreAnalysisScoreLabel"></span>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="scoreAnalysisModalContent">
+                <!-- Populated by JS -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<footer id="solverforge-auto-footer"></footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/js/bootstrap.bundle.min.js"></script>
+<script src="/webjars/solverforge/js/solverforge-webui.js"></script>
+<script src="/warehouse-api.js"></script>
+<script src="/logisim-view.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
