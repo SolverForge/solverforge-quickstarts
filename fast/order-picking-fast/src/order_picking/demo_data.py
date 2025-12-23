@@ -7,12 +7,12 @@ from .domain import Product, Order, OrderItem, Trolley, TrolleyStep, OrderPickin
 from .warehouse import WarehouseLocation, Side, Column, Row, new_shelving_id, Shelving
 
 
-# Configuration constants
+# Configuration constants - matches Java timefold-quickstarts
 TROLLEYS_COUNT = 5
 BUCKET_COUNT = 4
-BUCKET_CAPACITY = 30000  # Reduced to force distribution across trolleys
-ORDERS_COUNT = 15  # Increased for realistic workload
-ORDER_ITEMS_SIZE_MINIMUM = 12  # Larger orders
+BUCKET_CAPACITY = 60 * 40 * 20  # 48000 cm3
+ORDERS_COUNT = 8
+ORDER_ITEMS_SIZE_MINIMUM = 1
 
 # Start location for all trolleys
 START_LOCATION = WarehouseLocation(
@@ -193,10 +193,10 @@ def build_trolleys(
 
 
 def build_orders(count: int, products: List[Product], random: Random) -> List[Order]:
-    """Build orders with random products."""
+    """Build orders with random products - matches Java implementation."""
     orders = []
     for order_num in range(1, count + 1):
-        # Random number of items (1 to product count - 1)
+        # Java: ORDER_ITEMS_SIZE_MINIMUM + random.nextInt(products.size() - ORDER_ITEMS_SIZE_MINIMUM)
         order_items_size = ORDER_ITEMS_SIZE_MINIMUM + random.randint(0, len(products) - ORDER_ITEMS_SIZE_MINIMUM - 1)
 
         order_items = []
@@ -205,7 +205,8 @@ def build_orders(count: int, products: List[Product], random: Random) -> List[Or
 
         item_num = 1
         for _ in range(order_items_size):
-            product = random.choice(products)
+            product_index = random.randint(0, len(products) - 1)
+            product = products[product_index]
             # Avoid duplicate products in the same order
             if product.id not in order_product_ids:
                 order_items.append(OrderItem(
@@ -242,6 +243,14 @@ def generate_demo_data() -> OrderPickingSolution:
     trolleys = build_trolleys(TROLLEYS_COUNT, BUCKET_COUNT, BUCKET_CAPACITY, START_LOCATION)
     orders = build_orders(ORDERS_COUNT, products, random)
     trolley_steps = build_trolley_steps(orders)
+
+    # Pre-assign steps evenly across trolleys so we have paths to visualize immediately
+    # The solver will optimize the distribution
+    if trolleys:
+        for i, step in enumerate(trolley_steps):
+            trolley = trolleys[i % len(trolleys)]
+            trolley.steps.append(step)
+            step.trolley = trolley
 
     return OrderPickingSolution(
         trolleys=trolleys,
