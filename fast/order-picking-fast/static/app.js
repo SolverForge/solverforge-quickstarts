@@ -546,26 +546,26 @@ function showScoreAnalysis(analysis) {
 
     if (!analysis || !analysis.constraints) {
         content.html('<p>No constraint data available.</p>');
-        new bootstrap.Modal($("#scoreAnalysisModal")).show();
-        return;
-    }
+    } else {
+        for (const constraint of analysis.constraints) {
+            const score = constraint.score || '0';
+            const isHard = score.includes('hard');
 
-    for (const constraint of analysis.constraints) {
-        const score = constraint.score || '0';
-        const isHard = score.includes('hard');
-
-        const group = $(`
-            <div class="constraint-group">
-                <div class="constraint-header">
-                    <span class="constraint-name">${constraint.name}</span>
-                    <span class="constraint-score ${isHard ? 'hard' : 'soft'}">${score}</span>
+            const group = $(`
+                <div class="constraint-group">
+                    <div class="constraint-header">
+                        <span class="constraint-name">${constraint.name}</span>
+                        <span class="constraint-score ${isHard ? 'hard' : 'soft'}">${score}</span>
+                    </div>
                 </div>
-            </div>
-        `);
-        content.append(group);
+            `);
+            content.append(group);
+        }
     }
 
-    new bootstrap.Modal($("#scoreAnalysisModal")).show();
+    // Use getOrCreateInstance to avoid stacking modal instances
+    const modalEl = document.getElementById('scoreAnalysisModal');
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
 
 // =============================================================================
