@@ -268,7 +268,7 @@ async fn get_demo_data_stream(Path(name): Path<String>) -> impl IntoResponse {
 }
 
 // ============================================================================
-// DTOs (Python API Compatible)
+// DTOs
 // ============================================================================
 
 /// Visit DTO matching Python API structure.
@@ -859,7 +859,8 @@ pub struct AnalyzeResponse {
 async fn analyze_route_plan(Json(dto): Json<RoutePlanDto>) -> Json<AnalyzeResponse> {
     use crate::constraints::{calculate_late_minutes, calculate_excess_capacity};
 
-    let plan = dto.to_domain();
+    let mut plan = dto.to_domain();
+    plan.update_shadows();
 
     // Calculate constraint scores
     let cap_total: i64 = plan.vehicles.iter()
@@ -1033,7 +1034,7 @@ async fn recommend_assignment(Json(request): Json<RecommendationRequest>) -> Jso
     plan.finalize();
 
     // Get baseline score
-    let baseline = calculate_score(&plan);
+    let baseline = calculate_score(&mut plan);
 
     // Try inserting at each position in each vehicle
     let mut recommendations: Vec<(RecommendedAssignment, HardSoftScore)> = Vec::new();
@@ -1045,7 +1046,7 @@ async fn recommend_assignment(Json(request): Json<RecommendationRequest>) -> Jso
             test_plan.vehicles[v_idx].visits.insert(insert_pos, visit_id_num);
             test_plan.finalize();
 
-            let new_score = calculate_score(&test_plan);
+            let new_score = calculate_score(&mut test_plan);
             let diff = new_score - baseline;
 
             recommendations.push((
@@ -1097,7 +1098,7 @@ async fn apply_recommendation(Json(request): Json<ApplyRecommendationRequest>) -
 
     // Recalculate score
     use crate::constraints::calculate_score;
-    plan.score = Some(calculate_score(&plan));
+    plan.score = Some(calculate_score(&mut plan));
 
     Json(RoutePlanDto::from_plan(&plan, None))
 }
