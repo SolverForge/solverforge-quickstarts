@@ -1,20 +1,79 @@
-//! Score calculator for Vehicle Routing Problem.
+//! Constraint definitions for Vehicle Routing Problem.
+//!
+//! Uses fluent constraint API with shadow variables for O(1) evaluation.
 //!
 //! # Constraints
 //!
 //! - **Vehicle capacity** (hard): Total demand must not exceed vehicle capacity
 //! - **Time windows** (hard): Service must complete before max end time
 //! - **Minimize travel time** (soft): Reduce total driving time
-//!
-//! # Design
-//!
-//! Uses a simple score calculator function with full solution access.
-//! No global state or RwLock overhead - direct array indexing into the plan's
-//! travel time matrix and visits.
 
 use solverforge::prelude::*;
+use solverforge::stream::ConstraintFactory;
+use solverforge::ConstraintSet;
 
-use crate::domain::{Vehicle, VehicleRoutePlan};
+use crate::domain::{Vehicle, VehicleRoutePlan, Visit};
+
+/// Creates the constraint set for vehicle routing.
+///
+/// All constraints use O(1) field access via shadow variables and cached
+/// aggregates. Call `plan.update_shadows()` before scoring.
+///
+/// # Examples
+///
+/// ```
+/// use vehicle_routing::constraints::define_constraints;
+/// use vehicle_routing::domain::{Location, Visit, Vehicle, VehicleRoutePlan};
+/// use solverforge::ConstraintSet;
+/// use solverforge::prelude::Score;
+///
+/// let depot = Location::new(0, 0.0, 0.0);
+/// let loc1 = Location::new(1, 0.0, 0.01);
+///
+/// let locations = vec![depot.clone(), loc1.clone()];
+/// let visits = vec![Visit::new(0, "A", loc1).with_demand(5)];
+/// let mut vehicle = Vehicle::new(0, "V1", 10, depot);
+/// vehicle.visits = vec![0];
+///
+/// let mut plan = VehicleRoutePlan::new("test", locations, visits, vec![vehicle]);
+/// plan.finalize();
+/// plan.update_shadows();
+///
+/// let constraints = define_constraints();
+/// let score = constraints.evaluate_all(&plan);
+/// assert!(score.is_feasible());  // Demand 5 <= capacity 10
+/// ```
+pub fn define_constraints() -> impl ConstraintSet<VehicleRoutePlan, HardSoftScore> {
+    let factory = ConstraintFactory::<VehicleRoutePlan, HardSoftScore>::new();
+
+    // HARD: Vehicle capacity - penalize excess demand
+    let vehicle_capacity = factory
+        .clone()
+        .for_each(|p: &VehicleRoutePlan| p.vehicles.as_slice())
+        .filter(|v: &Vehicle| v.excess_demand() > 0)
+        .penalize_hard_with(|v: &Vehicle| HardSoftScore::of_hard(-(v.excess_demand() as i64)))
+        .as_constraint("vehicleCapacity");
+
+    // HARD: Time windows - penalize late arrivals using shadow variable
+    let time_window = factory
+        .clone()
+        .for_each(|p: &VehicleRoutePlan| p.visits.as_slice())
+        .filter(|v: &Visit| v.is_late())
+        .penalize_hard_with(|v: &Visit| HardSoftScore::of_hard(-v.late_minutes()))
+        .as_constraint("serviceFinishedAfterMaxEndTime");
+
+    // SOFT: Minimize travel time
+    let minimize_travel = factory
+        .for_each(|p: &VehicleRoutePlan| p.vehicles.as_slice())
+        .penalize_with(|v: &Vehicle| HardSoftScore::of_soft(-v.driving_time_minutes()))
+        .as_constraint("minimizeTravelTime");
+
+    (vehicle_capacity, time_window, minimize_travel)
+}
+
+// ============================================================================
+// Legacy function-based score calculator (for backward compatibility)
+// ============================================================================
 
 /// Calculates the score for a vehicle routing solution.
 ///
@@ -30,7 +89,7 @@ use crate::domain::{Vehicle, VehicleRoutePlan};
 /// ```
 /// use vehicle_routing::constraints::calculate_score;
 /// use vehicle_routing::domain::{Location, Visit, Vehicle, VehicleRoutePlan};
-/// use solverforge::prelude::Score;  // For is_feasible()
+/// use solverforge::prelude::Score;
 ///
 /// let depot = Location::new(0, 0.0, 0.0);
 /// let locations = vec![depot.clone()];
@@ -42,16 +101,14 @@ use crate::domain::{Vehicle, VehicleRoutePlan};
 /// plan.finalize();
 ///
 /// let score = calculate_score(&plan);
-/// assert!(score.is_feasible()); // Demand 5 <= capacity 10
+/// assert!(score.is_feasible());
 /// ```
 pub fn calculate_score(plan: &VehicleRoutePlan) -> HardSoftScore {
     let mut hard = 0i64;
     let mut soft = 0i64;
 
     for vehicle in &plan.vehicles {
-        // =====================================================================
         // HARD: Vehicle Capacity
-        // =====================================================================
         let total_demand: i32 = vehicle
             .visits
             .iter()
@@ -63,27 +120,21 @@ pub fn calculate_score(plan: &VehicleRoutePlan) -> HardSoftScore {
             hard -= (total_demand - vehicle.capacity) as i64;
         }
 
-        // =====================================================================
         // HARD: Time Windows
-        // =====================================================================
         let late_minutes = calculate_late_minutes_for_vehicle(plan, vehicle);
         if late_minutes > 0 {
             hard -= late_minutes;
         }
 
-        // =====================================================================
         // SOFT: Minimize Travel Time
-        // =====================================================================
         let driving_seconds = plan.total_driving_time(vehicle);
-        soft -= driving_seconds / 60; // Convert to minutes
+        soft -= driving_seconds / 60;
     }
 
     HardSoftScore::of(hard, soft)
 }
 
 /// Calculates total late minutes for a vehicle's route.
-///
-/// A visit is late if service finishes after `max_end_time`.
 fn calculate_late_minutes_for_vehicle(plan: &VehicleRoutePlan, vehicle: &Vehicle) -> i64 {
     if vehicle.visits.is_empty() {
         return 0;
@@ -98,18 +149,13 @@ fn calculate_late_minutes_for_vehicle(plan: &VehicleRoutePlan, vehicle: &Vehicle
             continue;
         };
 
-        // Travel to this visit
         let travel = plan.travel_time(current_loc_idx, visit.location.index);
         let arrival = current_time + travel;
-
-        // Service starts at max(arrival, min_start_time)
         let service_start = arrival.max(visit.min_start_time);
         let service_end = service_start + visit.service_duration;
 
-        // Check if late (service finishes after max_end_time)
         if service_end > visit.max_end_time {
             let late_seconds = service_end - visit.max_end_time;
-            // Round up to minutes
             total_late += (late_seconds + 59) / 60;
         }
 
@@ -120,10 +166,6 @@ fn calculate_late_minutes_for_vehicle(plan: &VehicleRoutePlan, vehicle: &Vehicle
     total_late
 }
 
-// ============================================================================
-// Helper functions (for analyze endpoint)
-// ============================================================================
-
 /// Calculates total late minutes for a vehicle's route (public API).
 ///
 /// # Examples
@@ -133,24 +175,21 @@ fn calculate_late_minutes_for_vehicle(plan: &VehicleRoutePlan, vehicle: &Vehicle
 /// use vehicle_routing::domain::{Location, Visit, Vehicle, VehicleRoutePlan};
 ///
 /// let depot = Location::new(0, 0.0, 0.0);
-/// let customer = Location::new(1, 0.0, 1.0);  // ~111 km away, ~2.2 hours at 50 km/h
+/// let customer = Location::new(1, 0.0, 1.0);
 ///
 /// let locations = vec![depot.clone(), customer.clone()];
 /// let visits = vec![
 ///     Visit::new(0, "A", customer)
-///         .with_time_window(0, 8 * 3600 + 30 * 60)  // Must finish by 8:30am
-///         .with_service_duration(300),  // 5 min service
+///         .with_time_window(0, 8 * 3600 + 30 * 60)
+///         .with_service_duration(300),
 /// ];
 /// let mut vehicle = Vehicle::new(0, "V1", 100, depot);
-/// vehicle.departure_time = 8 * 3600;  // Depart at 8am
+/// vehicle.departure_time = 8 * 3600;
 /// vehicle.visits = vec![0];
 ///
 /// let mut plan = VehicleRoutePlan::new("test", locations, visits, vec![vehicle.clone()]);
 /// plan.finalize();
 ///
-/// // Vehicle departs 8am, travels ~2.2 hours, arrives ~10:13am
-/// // Service ends ~10:18am, but max_end is 8:30am
-/// // Late by ~108 minutes
 /// let late = calculate_late_minutes(&plan, &vehicle);
 /// assert!(late > 100);
 /// ```
@@ -174,12 +213,11 @@ pub fn calculate_late_minutes(plan: &VehicleRoutePlan, vehicle: &Vehicle) -> i64
 ///     Visit::new(1, "B", depot.clone()).with_demand(50),
 /// ];
 /// let mut vehicle = Vehicle::new(0, "V1", 100, depot);
-/// vehicle.visits = vec![0, 1]; // Total demand = 110
+/// vehicle.visits = vec![0, 1];
 ///
 /// let mut plan = VehicleRoutePlan::new("test", locations, visits, vec![vehicle.clone()]);
 /// plan.finalize();
 ///
-/// // Excess = 110 - 100 = 10
 /// assert_eq!(calculate_excess_capacity(&plan, &vehicle), 10);
 /// ```
 #[inline]
