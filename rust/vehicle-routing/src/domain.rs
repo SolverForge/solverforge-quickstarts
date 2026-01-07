@@ -147,10 +147,11 @@ impl Location {
 /// assert_eq!(visit.demand, 8);
 /// assert_eq!(visit.min_start_time, 21600); // 6 * 3600
 /// ```
-#[problem_fact]
+#[planning_entity]
 #[derive(Serialize, Deserialize)]
 pub struct Visit {
     /// Index in `VehicleRoutePlan.visits`.
+    #[planning_id]
     pub index: usize,
     /// Customer name.
     pub name: String,
@@ -315,7 +316,7 @@ pub struct VehicleRoutePlan {
     #[problem_fact_collection]
     pub locations: Vec<Location>,
     /// All customer visits.
-    #[problem_fact_collection]
+    #[planning_entity_collection]
     pub visits: Vec<Visit>,
     /// All vehicles.
     #[planning_entity_collection]
