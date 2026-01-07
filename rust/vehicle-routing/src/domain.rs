@@ -228,6 +228,66 @@ impl Visit {
         self
     }
 
+    /// Returns true if service finishes after max_end_time.
+    ///
+    /// Uses the arrival_time shadow variable for O(1) evaluation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use vehicle_routing::domain::{Visit, Location};
+    ///
+    /// let loc = Location::new(0, 0.0, 0.0);
+    /// let mut visit = Visit::new(0, "A", loc)
+    ///     .with_time_window(8 * 3600, 9 * 3600)  // 8am-9am window
+    ///     .with_service_duration(1800);          // 30 min service
+    ///
+    /// // Arrives at 8:45am, service ends at 9:15am (late by 15 min)
+    /// visit.arrival_time = Some(8 * 3600 + 45 * 60);
+    /// assert!(visit.is_late());
+    ///
+    /// // Arrives at 8:00am, service ends at 8:30am (on time)
+    /// visit.arrival_time = Some(8 * 3600);
+    /// assert!(!visit.is_late());
+    /// ```
+    #[inline]
+    pub fn is_late(&self) -> bool {
+        self.arrival_time.map_or(false, |arrival| {
+            let service_start = arrival.max(self.min_start_time);
+            let service_end = service_start + self.service_duration;
+            service_end > self.max_end_time
+        })
+    }
+
+    /// Returns delay in minutes if service finishes late, 0 otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use vehicle_routing::domain::{Visit, Location};
+    ///
+    /// let loc = Location::new(0, 0.0, 0.0);
+    /// let mut visit = Visit::new(0, "A", loc)
+    ///     .with_time_window(8 * 3600, 9 * 3600)  // 8am-9am window
+    ///     .with_service_duration(1800);          // 30 min service
+    ///
+    /// // Arrives at 8:45am, service ends at 9:15am (late by 15 min)
+    /// visit.arrival_time = Some(8 * 3600 + 45 * 60);
+    /// assert_eq!(visit.late_minutes(), 15);
+    ///
+    /// // Arrives at 8:00am, on time
+    /// visit.arrival_time = Some(8 * 3600);
+    /// assert_eq!(visit.late_minutes(), 0);
+    /// ```
+    #[inline]
+    pub fn late_minutes(&self) -> i64 {
+        self.arrival_time.map_or(0, |arrival| {
+            let service_start = arrival.max(self.min_start_time);
+            let service_end = service_start + self.service_duration;
+            let delay_seconds = (service_end - self.max_end_time).max(0);
+            (delay_seconds + 59) / 60  // Round up to minutes
+        })
+    }
 }
 
 /// A delivery vehicle with capacity and assigned route.
