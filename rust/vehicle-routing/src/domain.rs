@@ -15,7 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 use solverforge::prelude::*;
-use solverforge::ShadowVariableSupport;
+use solverforge::{ListPositionDistanceMeter, ShadowVariableSupport};
 use std::collections::HashMap;
 
 /// Average driving speed in km/h for travel time estimation.
@@ -1009,5 +1009,77 @@ pub fn sublist_insert(
         for (i, item) in items.into_iter().enumerate() {
             v.visits.insert(pos + i, item);
         }
+    }
+}
+
+// =============================================================================
+// Distance Meter for Nearby K-opt Selection
+// =============================================================================
+
+/// Distance meter for nearby k-opt selection in vehicle routing.
+///
+/// Measures distance between visits by their travel time, enabling
+/// `NearbyKOptMoveSelector` to prune distant cut combinations.
+///
+/// # Examples
+///
+/// ```
+/// use vehicle_routing::domain::{Location, Visit, Vehicle, VehicleRoutePlan, VrpDistanceMeter};
+/// use solverforge::ListPositionDistanceMeter;
+///
+/// // Create a route: depot -> A -> B -> C
+/// let depot = Location::new(0, 0.0, 0.0);
+/// let loc_a = Location::new(1, 0.0, 0.01);   // ~1.1 km
+/// let loc_b = Location::new(2, 0.0, 0.02);   // ~2.2 km from origin
+/// let loc_c = Location::new(3, 0.0, 0.10);   // ~11 km from origin
+///
+/// let locations = vec![depot.clone(), loc_a.clone(), loc_b.clone(), loc_c.clone()];
+/// let visits = vec![
+///     Visit::new(0, "A", loc_a),
+///     Visit::new(1, "B", loc_b),
+///     Visit::new(2, "C", loc_c),
+/// ];
+/// let mut vehicle = Vehicle::new(0, "V1", 100, depot);
+/// vehicle.visits = vec![0, 1, 2];
+///
+/// let mut plan = VehicleRoutePlan::new("test", locations, visits, vec![vehicle]);
+/// plan.finalize();
+///
+/// let meter = VrpDistanceMeter;
+///
+/// // Distance A to B (position 0 to 1) should be smaller than A to C (0 to 2)
+/// let dist_ab = meter.distance(&plan, 0, 0, 1);
+/// let dist_ac = meter.distance(&plan, 0, 0, 2);
+/// assert!(dist_ab < dist_ac);
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct VrpDistanceMeter;
+
+impl ListPositionDistanceMeter<VehicleRoutePlan> for VrpDistanceMeter {
+    fn distance(&self, plan: &VehicleRoutePlan, entity_idx: usize, pos_a: usize, pos_b: usize) -> f64 {
+        let visits = match plan.vehicles.get(entity_idx) {
+            Some(v) => &v.visits,
+            None => return f64::MAX,
+        };
+
+        let visit_a = match visits.get(pos_a) {
+            Some(&idx) => idx,
+            None => return f64::MAX,
+        };
+        let visit_b = match visits.get(pos_b) {
+            Some(&idx) => idx,
+            None => return f64::MAX,
+        };
+
+        let loc_a = match plan.visits.get(visit_a) {
+            Some(v) => v.location.index,
+            None => return f64::MAX,
+        };
+        let loc_b = match plan.visits.get(visit_b) {
+            Some(v) => v.location.index,
+            None => return f64::MAX,
+        };
+
+        plan.travel_time(loc_a, loc_b) as f64
     }
 }
