@@ -326,6 +326,18 @@ pub struct Vehicle {
     #[planning_list_variable]
     #[serde(default)]
     pub visits: Vec<usize>,
+
+    // =========================================================================
+    // Cached Aggregates (updated by ShadowVariableSupport)
+    // =========================================================================
+
+    /// Cached sum of demands for all visits in route.
+    #[serde(skip)]
+    pub cached_total_demand: i32,
+
+    /// Cached total driving time in seconds.
+    #[serde(skip)]
+    pub cached_driving_time: i64,
 }
 
 impl Vehicle {
@@ -338,6 +350,8 @@ impl Vehicle {
             home_location,
             departure_time: 8 * 3600, // Default 8am
             visits: Vec::new(),
+            cached_total_demand: 0,
+            cached_driving_time: 0,
         }
     }
 
@@ -345,6 +359,67 @@ impl Vehicle {
     pub fn with_departure_time(mut self, time: i64) -> Self {
         self.departure_time = time;
         self
+    }
+
+    /// Returns cached total demand for all visits in route.
+    ///
+    /// O(1) access to pre-computed value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use vehicle_routing::domain::{Vehicle, Location};
+    ///
+    /// let depot = Location::new(0, 0.0, 0.0);
+    /// let mut vehicle = Vehicle::new(0, "V1", 100, depot);
+    /// vehicle.cached_total_demand = 75;
+    ///
+    /// assert_eq!(vehicle.total_demand(), 75);
+    /// ```
+    #[inline]
+    pub fn total_demand(&self) -> i32 {
+        self.cached_total_demand
+    }
+
+    /// Returns excess demand (amount over capacity), 0 if under capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use vehicle_routing::domain::{Vehicle, Location};
+    ///
+    /// let depot = Location::new(0, 0.0, 0.0);
+    /// let mut vehicle = Vehicle::new(0, "V1", 100, depot);
+    ///
+    /// // Under capacity
+    /// vehicle.cached_total_demand = 80;
+    /// assert_eq!(vehicle.excess_demand(), 0);
+    ///
+    /// // Over capacity
+    /// vehicle.cached_total_demand = 120;
+    /// assert_eq!(vehicle.excess_demand(), 20);
+    /// ```
+    #[inline]
+    pub fn excess_demand(&self) -> i32 {
+        (self.cached_total_demand - self.capacity).max(0)
+    }
+
+    /// Returns cached driving time in minutes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use vehicle_routing::domain::{Vehicle, Location};
+    ///
+    /// let depot = Location::new(0, 0.0, 0.0);
+    /// let mut vehicle = Vehicle::new(0, "V1", 100, depot);
+    /// vehicle.cached_driving_time = 7200; // 2 hours in seconds
+    ///
+    /// assert_eq!(vehicle.driving_time_minutes(), 120);
+    /// ```
+    #[inline]
+    pub fn driving_time_minutes(&self) -> i64 {
+        self.cached_driving_time / 60
     }
 }
 
