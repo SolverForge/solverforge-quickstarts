@@ -667,12 +667,11 @@ async fn create_route_plan(
     }
 
     // Convert termination config from DTO
+    // Note: unimproved_* limits not yet supported by LocalSearchPhase
     let config = if let Some(term) = &dto.termination {
         SolverConfig {
             time_limit: term.seconds_spent_limit.map(Duration::from_secs),
-            unimproved_time_limit: term.unimproved_seconds_spent_limit.map(Duration::from_secs),
             step_limit: term.step_count_limit,
-            unimproved_step_limit: term.unimproved_step_count_limit,
         }
     } else {
         SolverConfig::default_config()
