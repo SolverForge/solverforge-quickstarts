@@ -15,6 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 use solverforge::prelude::*;
+use solverforge::ShadowVariableSupport;
 use std::collections::HashMap;
 
 /// Average driving speed in km/h for travel time estimation.
@@ -778,51 +779,235 @@ impl VehicleRoutePlan {
 
         // Phase 2: Update each vehicle's route
         for vehicle_idx in 0..self.vehicles.len() {
-            let vehicle = &self.vehicles[vehicle_idx];
-            let visit_indices: Vec<usize> = vehicle.visits.iter().copied().collect();
-            let departure_time = vehicle.departure_time;
-            let depot_idx = vehicle.home_location.index;
+            self.update_vehicle_shadows(vehicle_idx);
+        }
+    }
 
-            // Update shadow variables on visits
-            let mut prev_departure = departure_time;
-            let mut prev_loc_idx = depot_idx;
-            let mut prev_visit_idx: Option<usize> = None;
+    /// Updates shadow variables for a single vehicle.
+    ///
+    /// Recomputes: vehicle_idx, previous_visit_idx, arrival_time for visits
+    /// in this vehicle's route; cached_total_demand, cached_driving_time.
+    fn update_vehicle_shadows(&mut self, vehicle_idx: usize) {
+        let vehicle = &self.vehicles[vehicle_idx];
+        let visit_indices: Vec<usize> = vehicle.visits.iter().copied().collect();
+        let departure_time = vehicle.departure_time;
+        let depot_idx = vehicle.home_location.index;
 
-            for &visit_idx in &visit_indices {
-                if visit_idx >= self.visits.len() {
-                    continue;
-                }
+        // Update shadow variables on visits
+        let mut prev_departure = departure_time;
+        let mut prev_loc_idx = depot_idx;
+        let mut prev_visit_idx: Option<usize> = None;
 
-                // Compute arrival time
-                let visit_loc_idx = self.visits[visit_idx].location.index;
-                let travel = self.travel_time(prev_loc_idx, visit_loc_idx);
-                let arrival = prev_departure + travel;
-
-                // Update shadow variables
-                let visit = &mut self.visits[visit_idx];
-                visit.vehicle_idx = Some(vehicle_idx);
-                visit.previous_visit_idx = prev_visit_idx;
-                visit.arrival_time = Some(arrival);
-
-                // Compute departure for next iteration
-                let service_start = arrival.max(visit.min_start_time);
-                prev_departure = service_start + visit.service_duration;
-                prev_loc_idx = visit_loc_idx;
-                prev_visit_idx = Some(visit_idx);
+        for &visit_idx in &visit_indices {
+            if visit_idx >= self.visits.len() {
+                continue;
             }
 
-            // Update cached aggregates on vehicle
-            let total_demand: i32 = visit_indices
-                .iter()
-                .filter_map(|&idx| self.visits.get(idx))
-                .map(|v| v.demand)
-                .sum();
+            // Compute arrival time
+            let visit_loc_idx = self.visits[visit_idx].location.index;
+            let travel = self.travel_time(prev_loc_idx, visit_loc_idx);
+            let arrival = prev_departure + travel;
 
-            let driving_time = self.total_driving_time(&self.vehicles[vehicle_idx]);
+            // Update shadow variables
+            let visit = &mut self.visits[visit_idx];
+            visit.vehicle_idx = Some(vehicle_idx);
+            visit.previous_visit_idx = prev_visit_idx;
+            visit.arrival_time = Some(arrival);
 
-            let vehicle = &mut self.vehicles[vehicle_idx];
-            vehicle.cached_total_demand = total_demand;
-            vehicle.cached_driving_time = driving_time;
+            // Compute departure for next iteration
+            let service_start = arrival.max(visit.min_start_time);
+            prev_departure = service_start + visit.service_duration;
+            prev_loc_idx = visit_loc_idx;
+            prev_visit_idx = Some(visit_idx);
+        }
+
+        // Update cached aggregates on vehicle
+        let total_demand: i32 = visit_indices
+            .iter()
+            .filter_map(|&idx| self.visits.get(idx))
+            .map(|v| v.demand)
+            .sum();
+
+        let driving_time = self.total_driving_time(&self.vehicles[vehicle_idx]);
+
+        let vehicle = &mut self.vehicles[vehicle_idx];
+        vehicle.cached_total_demand = total_demand;
+        vehicle.cached_driving_time = driving_time;
+    }
+}
+
+impl ShadowVariableSupport for VehicleRoutePlan {
+    /// Updates shadow variables for a single vehicle entity.
+    ///
+    /// Called by `ShadowAwareScoreDirector` after a move modifies a vehicle's
+    /// visits list. Enables O(1) incremental updates instead of full solution
+    /// recalculation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use vehicle_routing::domain::{Location, Visit, Vehicle, VehicleRoutePlan};
+    /// use solverforge::ShadowVariableSupport;
+    ///
+    /// let depot = Location::new(0, 0.0, 0.0);
+    /// let loc1 = Location::new(1, 0.0, 0.01);
+    ///
+    /// let locations = vec![depot.clone(), loc1.clone()];
+    /// let visits = vec![Visit::new(0, "A", loc1).with_demand(15)];
+    /// let mut vehicle = Vehicle::new(0, "V1", 100, depot);
+    /// vehicle.visits = vec![0];
+    ///
+    /// let mut plan = VehicleRoutePlan::new("test", locations, visits, vec![vehicle]);
+    /// plan.finalize();
+    ///
+    /// // Update shadows for vehicle 0
+    /// plan.update_entity_shadows(0);
+    ///
+    /// assert_eq!(plan.visits[0].vehicle_idx, Some(0));
+    /// assert_eq!(plan.vehicles[0].cached_total_demand, 15);
+    /// ```
+    fn update_entity_shadows(&mut self, entity_index: usize) {
+        if entity_index < self.vehicles.len() {
+            self.update_vehicle_shadows(entity_index);
+        }
+    }
+}
+
+// =============================================================================
+// Typed List Operations for Move Selectors
+// =============================================================================
+
+/// Returns the length of a vehicle's visits list.
+///
+/// Used by `ListChangeMove` and `KOptMove` for bounds checking.
+///
+/// # Examples
+///
+/// ```
+/// use vehicle_routing::domain::{Location, Vehicle, VehicleRoutePlan, visits_len};
+///
+/// let depot = Location::new(0, 0.0, 0.0);
+/// let mut vehicle = Vehicle::new(0, "V1", 100, depot.clone());
+/// vehicle.visits = vec![0, 1, 2];
+///
+/// let plan = VehicleRoutePlan::new("test", vec![depot], vec![], vec![vehicle]);
+///
+/// assert_eq!(visits_len(&plan, 0), 3);
+/// assert_eq!(visits_len(&plan, 99), 0);  // Out of bounds
+/// ```
+#[inline]
+pub fn visits_len(plan: &VehicleRoutePlan, entity_idx: usize) -> usize {
+    plan.vehicles.get(entity_idx).map_or(0, |v| v.visits.len())
+}
+
+/// Removes and returns a visit from a vehicle's route at the given position.
+///
+/// Used by `ListChangeMove` for single-element relocation.
+///
+/// # Examples
+///
+/// ```
+/// use vehicle_routing::domain::{Location, Vehicle, VehicleRoutePlan, visits_remove};
+///
+/// let depot = Location::new(0, 0.0, 0.0);
+/// let mut vehicle = Vehicle::new(0, "V1", 100, depot.clone());
+/// vehicle.visits = vec![10, 20, 30];
+///
+/// let mut plan = VehicleRoutePlan::new("test", vec![depot], vec![], vec![vehicle]);
+///
+/// assert_eq!(visits_remove(&mut plan, 0, 1), Some(20));
+/// assert_eq!(plan.vehicles[0].visits, vec![10, 30]);
+/// ```
+#[inline]
+pub fn visits_remove(plan: &mut VehicleRoutePlan, entity_idx: usize, pos: usize) -> Option<usize> {
+    plan.vehicles.get_mut(entity_idx).map(|v| v.visits.remove(pos))
+}
+
+/// Inserts a visit into a vehicle's route at the given position.
+///
+/// Used by `ListChangeMove` for single-element relocation.
+///
+/// # Examples
+///
+/// ```
+/// use vehicle_routing::domain::{Location, Vehicle, VehicleRoutePlan, visits_insert};
+///
+/// let depot = Location::new(0, 0.0, 0.0);
+/// let mut vehicle = Vehicle::new(0, "V1", 100, depot.clone());
+/// vehicle.visits = vec![10, 30];
+///
+/// let mut plan = VehicleRoutePlan::new("test", vec![depot], vec![], vec![vehicle]);
+///
+/// visits_insert(&mut plan, 0, 1, 20);
+/// assert_eq!(plan.vehicles[0].visits, vec![10, 20, 30]);
+/// ```
+#[inline]
+pub fn visits_insert(plan: &mut VehicleRoutePlan, entity_idx: usize, pos: usize, val: usize) {
+    if let Some(v) = plan.vehicles.get_mut(entity_idx) {
+        v.visits.insert(pos, val);
+    }
+}
+
+/// Removes and returns a contiguous sublist from a vehicle's route.
+///
+/// Used by `KOptMove` for segment-based operations.
+///
+/// # Examples
+///
+/// ```
+/// use vehicle_routing::domain::{Location, Vehicle, VehicleRoutePlan, sublist_remove};
+///
+/// let depot = Location::new(0, 0.0, 0.0);
+/// let mut vehicle = Vehicle::new(0, "V1", 100, depot.clone());
+/// vehicle.visits = vec![10, 20, 30, 40, 50];
+///
+/// let mut plan = VehicleRoutePlan::new("test", vec![depot], vec![], vec![vehicle]);
+///
+/// let removed = sublist_remove(&mut plan, 0, 1, 4);
+/// assert_eq!(removed, vec![20, 30, 40]);
+/// assert_eq!(plan.vehicles[0].visits, vec![10, 50]);
+/// ```
+#[inline]
+pub fn sublist_remove(
+    plan: &mut VehicleRoutePlan,
+    entity_idx: usize,
+    start: usize,
+    end: usize,
+) -> Vec<usize> {
+    plan.vehicles
+        .get_mut(entity_idx)
+        .map(|v| v.visits.drain(start..end).collect())
+        .unwrap_or_default()
+}
+
+/// Inserts a sublist into a vehicle's route at the given position.
+///
+/// Used by `KOptMove` for segment-based operations.
+///
+/// # Examples
+///
+/// ```
+/// use vehicle_routing::domain::{Location, Vehicle, VehicleRoutePlan, sublist_insert};
+///
+/// let depot = Location::new(0, 0.0, 0.0);
+/// let mut vehicle = Vehicle::new(0, "V1", 100, depot.clone());
+/// vehicle.visits = vec![10, 50];
+///
+/// let mut plan = VehicleRoutePlan::new("test", vec![depot], vec![], vec![vehicle]);
+///
+/// sublist_insert(&mut plan, 0, 1, vec![20, 30, 40]);
+/// assert_eq!(plan.vehicles[0].visits, vec![10, 20, 30, 40, 50]);
+/// ```
+#[inline]
+pub fn sublist_insert(
+    plan: &mut VehicleRoutePlan,
+    entity_idx: usize,
+    pos: usize,
+    items: Vec<usize>,
+) {
+    if let Some(v) = plan.vehicles.get_mut(entity_idx) {
+        for (i, item) in items.into_iter().enumerate() {
+            v.visits.insert(pos + i, item);
         }
     }
 }
