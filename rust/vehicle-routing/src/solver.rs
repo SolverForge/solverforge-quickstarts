@@ -1,20 +1,30 @@
 //! Solver service for Vehicle Routing Problem.
 //!
-//! Uses Late Acceptance local search with 3-opt moves for efficient route optimization.
-//! Direct score calculation with full solution access (no global state).
+//! Uses Late Acceptance local search with list-change moves for route optimization.
+//! Imports only from the `solverforge` umbrella crate.
 
 use parking_lot::RwLock;
-use rand::Rng;
-use solverforge::prelude::*;
+use solverforge::{
+    // Core types
+    prelude::*,
+    // Phase infrastructure
+    FirstAcceptedForager, LateAcceptanceAcceptor, ListChangeMove, ListChangeMoveSelector,
+    LocalSearchPhase, Phase, SolverScope,
+    // Selectors
+    FromSolutionEntitySelector,
+    // Shadow variable support
+    ShadowAwareScoreDirector,
+};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
-use tracing::{debug, info};
+use tracing::info;
 
 use crate::console::{self, PhaseTimer};
-use crate::constraints::calculate_score;
-use crate::domain::VehicleRoutePlan;
+use crate::constraints::{calculate_score, define_constraints};
+use crate::domain::{visits_insert, visits_len, visits_remove, VehicleRoutePlan};
 
 /// Default solving time: 30 seconds.
 const DEFAULT_TIME_LIMIT_SECS: u64 = 30;
@@ -23,18 +33,12 @@ const DEFAULT_TIME_LIMIT_SECS: u64 = 30;
 const LATE_ACCEPTANCE_SIZE: usize = 400;
 
 /// Solver configuration with termination criteria.
-///
-/// Multiple termination conditions combine with OR logic (any triggers termination).
 #[derive(Debug, Clone, Default)]
 pub struct SolverConfig {
     /// Stop after this duration.
     pub time_limit: Option<Duration>,
-    /// Stop after this duration without improvement.
-    pub unimproved_time_limit: Option<Duration>,
     /// Stop after this many steps.
     pub step_limit: Option<u64>,
-    /// Stop after this many steps without improvement.
-    pub unimproved_step_limit: Option<u64>,
 }
 
 impl SolverConfig {
@@ -44,37 +48,6 @@ impl SolverConfig {
             time_limit: Some(Duration::from_secs(DEFAULT_TIME_LIMIT_SECS)),
             ..Default::default()
         }
-    }
-
-    /// Checks if any termination condition is met.
-    fn should_terminate(
-        &self,
-        elapsed: Duration,
-        steps: u64,
-        time_since_improvement: Duration,
-        steps_since_improvement: u64,
-    ) -> bool {
-        if let Some(limit) = self.time_limit {
-            if elapsed >= limit {
-                return true;
-            }
-        }
-        if let Some(limit) = self.unimproved_time_limit {
-            if time_since_improvement >= limit {
-                return true;
-            }
-        }
-        if let Some(limit) = self.step_limit {
-            if steps >= limit {
-                return true;
-            }
-        }
-        if let Some(limit) = self.unimproved_step_limit {
-            if steps_since_improvement >= limit {
-                return true;
-            }
-        }
-        false
     }
 }
 
@@ -268,7 +241,7 @@ fn solve_blocking(
 
     // Phase 1: Construction heuristic (round-robin)
     let mut ch_timer = PhaseTimer::start("ConstructionHeuristic", 0);
-    let mut current_score = construction_heuristic(&mut solution, &mut ch_timer);
+    let current_score = construction_heuristic(&mut solution, &mut ch_timer);
     ch_timer.finish();
 
     // Print solving started after construction
@@ -283,7 +256,7 @@ fn solve_blocking(
     // Update job with constructed solution
     update_job(&job, &solution, current_score);
 
-    // Phase 2: Late Acceptance local search with 3-opt
+    // Phase 2: Late Acceptance local search with list-change moves
     let n_vehicles = solution.vehicles.len();
     if n_vehicles == 0 {
         info!("No vehicles to optimize");
@@ -298,91 +271,90 @@ fn solve_blocking(
         return;
     }
 
-    let mut ls_timer = PhaseTimer::start("LateAcceptance", 1);
-    let mut late_scores = vec![current_score; LATE_ACCEPTANCE_SIZE];
-    let mut step: u64 = 0;
-    let mut rng = rand::thread_rng();
+    let ls_timer = PhaseTimer::start("LateAcceptance", 1);
 
-    // Track best score and improvement times
-    let mut best_score = current_score;
-    let mut last_improvement_time = solve_start;
-    let mut last_improvement_step: u64 = 0;
+    // Create entity selector for all vehicles
+    let entity_selector = FromSolutionEntitySelector::new(0);
 
-    loop {
-        // Check termination conditions
-        let elapsed = solve_start.elapsed();
-        let time_since_improvement = last_improvement_time.elapsed();
-        let steps_since_improvement = step - last_improvement_step;
+    // Create list-change move selector
+    let move_selector: ListChangeMoveSelector<VehicleRoutePlan, usize> = ListChangeMoveSelector::new(
+        Box::new(entity_selector),
+        visits_len,
+        visits_remove,
+        visits_insert,
+        "visits",
+        0,
+    );
 
-        if config.should_terminate(elapsed, step, time_since_improvement, steps_since_improvement) {
-            debug!("Termination condition met");
-            break;
-        }
+    // Create acceptor and forager
+    let acceptor = LateAcceptanceAcceptor::<VehicleRoutePlan>::new(LATE_ACCEPTANCE_SIZE);
+    let forager = FirstAcceptedForager::<VehicleRoutePlan, ListChangeMove<VehicleRoutePlan, usize>>::new();
 
-        // Check for stop signal
-        if stop_rx.try_recv().is_ok() {
-            info!("Solving terminated early by user");
-            break;
-        }
+    // Create local search phase
+    let mut phase = LocalSearchPhase::new(
+        Box::new(move_selector),
+        Box::new(acceptor),
+        Box::new(forager),
+        config.step_limit,
+    );
 
-        // Alternate between list-change and 2-opt moves
-        let accepted = if step % 3 == 0 {
-            // 2-opt move (intra-route segment reversal)
-            try_two_opt_move(&mut solution, &mut current_score, &late_scores, step, &mut rng, &mut ls_timer)
-        } else {
-            // List-change move (visit relocation)
-            try_list_change_move(&mut solution, &mut current_score, &late_scores, step, &mut rng, &mut ls_timer)
-        };
+    // Create score director with shadow variable support
+    let descriptor = crate::domain::create_solution_descriptor();
+    let constraints = define_constraints();
+    let score_calculator = move |plan: &VehicleRoutePlan| constraints.evaluate_all(plan);
+    let inner_director =
+        SimpleScoreDirector::with_calculator(solution, descriptor, score_calculator);
+    let director = ShadowAwareScoreDirector::new(inner_director);
 
-        if accepted {
-            // Update late acceptance history
-            let late_idx = (step as usize) % LATE_ACCEPTANCE_SIZE;
-            late_scores[late_idx] = current_score;
+    // Create solver scope
+    let mut solver_scope = SolverScope::new(Box::new(director));
 
-            // Track improvements
-            if current_score > best_score {
-                best_score = current_score;
-                last_improvement_time = Instant::now();
-                last_improvement_step = step;
+    // Set up termination flag for stop signal
+    let terminate_flag = Arc::new(AtomicBool::new(false));
+    solver_scope.set_terminate_early_flag(terminate_flag.clone());
+
+    // Spawn task to handle stop signal
+    let terminate_flag_clone = terminate_flag.clone();
+    let time_limit = config.time_limit;
+    std::thread::spawn(move || {
+        // Wait for either stop signal or timeout
+        let deadline = time_limit.map(|d| Instant::now() + d);
+        loop {
+            // Check stop signal (non-blocking)
+            if stop_rx.try_recv().is_ok() {
+                terminate_flag_clone.store(true, Ordering::SeqCst);
+                break;
             }
-
-            // Periodic update
-            if ls_timer.steps_accepted().is_multiple_of(1000) {
-                update_job(&job, &solution, current_score);
-                debug!(
-                    step,
-                    moves_accepted = ls_timer.steps_accepted(),
-                    score = %current_score,
-                    elapsed_secs = solve_start.elapsed().as_secs(),
-                    "Progress update"
-                );
+            // Check timeout
+            if let Some(deadline) = deadline {
+                if Instant::now() >= deadline {
+                    terminate_flag_clone.store(true, Ordering::SeqCst);
+                    break;
+                }
             }
-
-            // Periodic console progress (every 10000 moves)
-            if ls_timer.moves_evaluated().is_multiple_of(10000) {
-                console::print_step_progress(
-                    ls_timer.steps_accepted(),
-                    ls_timer.elapsed(),
-                    ls_timer.moves_evaluated(),
-                    &current_score.to_string(),
-                );
-            }
+            std::thread::sleep(Duration::from_millis(100));
         }
+    });
 
-        step += 1;
-    }
+    // Run local search phase
+    phase.solve(&mut solver_scope);
 
+    // Get stats before consuming timer
+    let total_moves = ls_timer.moves_evaluated();
     ls_timer.finish();
 
+    // Extract final solution
+    let final_solution = solver_scope.working_solution().clone();
+    let final_score = final_solution.score.unwrap_or(current_score);
+
     let total_duration = solve_start.elapsed();
-    let total_moves = step;
 
     info!(
         job_id = %job_id,
         duration_secs = total_duration.as_secs_f64(),
-        steps = step,
-        score = %current_score,
-        feasible = current_score.is_feasible(),
+        steps = total_moves,
+        score = %final_score,
+        feasible = final_score.is_feasible(),
         "Solving complete"
     );
 
@@ -390,11 +362,11 @@ fn solve_blocking(
         total_duration,
         total_moves,
         2,
-        &current_score.to_string(),
-        current_score.is_feasible(),
+        &final_score.to_string(),
+        final_score.is_feasible(),
     );
 
-    finish_job(&job, &solution, current_score);
+    finish_job(&job, &final_solution, final_score);
 }
 
 /// Construction heuristic: round-robin visit assignment.
@@ -441,152 +413,6 @@ fn construction_heuristic(solution: &mut VehicleRoutePlan, timer: &mut PhaseTime
     }
 
     calculate_score(solution)
-}
-
-/// Tries a list-change (visit relocation) move.
-/// Returns true if the move was accepted.
-fn try_list_change_move<R: Rng>(
-    solution: &mut VehicleRoutePlan,
-    current_score: &mut HardSoftScore,
-    late_scores: &[HardSoftScore],
-    step: u64,
-    rng: &mut R,
-    timer: &mut PhaseTimer,
-) -> bool {
-    let n_vehicles = solution.vehicles.len();
-
-    // Find a non-empty source vehicle
-    let non_empty: Vec<usize> = solution
-        .vehicles
-        .iter()
-        .enumerate()
-        .filter(|(_, v)| !v.visits.is_empty())
-        .map(|(i, _)| i)
-        .collect();
-
-    if non_empty.is_empty() {
-        return false;
-    }
-
-    let src_vehicle = non_empty[rng.gen_range(0..non_empty.len())];
-    let src_len = solution.vehicles[src_vehicle].visits.len();
-    let src_pos = rng.gen_range(0..src_len);
-
-    // Pick destination vehicle and position
-    let dst_vehicle = rng.gen_range(0..n_vehicles);
-    let dst_len = solution.vehicles[dst_vehicle].visits.len();
-
-    // Valid insertion position
-    let max_pos = if src_vehicle == dst_vehicle {
-        src_len
-    } else {
-        dst_len + 1
-    };
-
-    if max_pos == 0 {
-        return false;
-    }
-
-    let dst_pos = rng.gen_range(0..max_pos);
-
-    // Skip no-op moves
-    if src_vehicle == dst_vehicle {
-        let effective_dst = if dst_pos > src_pos { dst_pos - 1 } else { dst_pos };
-        if src_pos == effective_dst {
-            return false;
-        }
-    }
-
-    timer.record_move();
-
-    // Apply move
-    let visit_idx = solution.vehicles[src_vehicle].visits.remove(src_pos);
-    let adjusted_dst = if src_vehicle == dst_vehicle && dst_pos > src_pos {
-        dst_pos - 1
-    } else {
-        dst_pos
-    };
-    solution.vehicles[dst_vehicle].visits.insert(adjusted_dst, visit_idx);
-
-    // Evaluate
-    let new_score = calculate_score(solution);
-    let late_idx = (step as usize) % late_scores.len();
-    let late_score = late_scores[late_idx];
-
-    if new_score >= *current_score || new_score >= late_score {
-        // Accept
-        timer.record_accepted(&new_score.to_string());
-        *current_score = new_score;
-        true
-    } else {
-        // Reject - undo
-        solution.vehicles[dst_vehicle].visits.remove(adjusted_dst);
-        solution.vehicles[src_vehicle].visits.insert(src_pos, visit_idx);
-        false
-    }
-}
-
-/// Tries a 2-opt move (reverse a segment within a route).
-/// Returns true if the move was accepted.
-fn try_two_opt_move<R: Rng>(
-    solution: &mut VehicleRoutePlan,
-    current_score: &mut HardSoftScore,
-    late_scores: &[HardSoftScore],
-    step: u64,
-    rng: &mut R,
-    timer: &mut PhaseTimer,
-) -> bool {
-    // Find a vehicle with at least 2 visits
-    let eligible: Vec<usize> = solution
-        .vehicles
-        .iter()
-        .enumerate()
-        .filter(|(_, v)| v.visits.len() >= 2)
-        .map(|(i, _)| i)
-        .collect();
-
-    if eligible.is_empty() {
-        return false;
-    }
-
-    let vehicle_idx = eligible[rng.gen_range(0..eligible.len())];
-    let route_len = solution.vehicles[vehicle_idx].visits.len();
-
-    // Pick two cut points for 2-opt
-    let i = rng.gen_range(0..route_len);
-    let j = rng.gen_range(0..route_len);
-
-    if i == j {
-        return false;
-    }
-
-    let (start, end) = if i < j { (i, j) } else { (j, i) };
-
-    // Need at least 2 elements to reverse
-    if end - start < 1 {
-        return false;
-    }
-
-    timer.record_move();
-
-    // Apply 2-opt: reverse segment [start, end]
-    solution.vehicles[vehicle_idx].visits[start..=end].reverse();
-
-    // Evaluate
-    let new_score = calculate_score(solution);
-    let late_idx = (step as usize) % late_scores.len();
-    let late_score = late_scores[late_idx];
-
-    if new_score >= *current_score || new_score >= late_score {
-        // Accept
-        timer.record_accepted(&new_score.to_string());
-        *current_score = new_score;
-        true
-    } else {
-        // Reject - undo (reverse again)
-        solution.vehicles[vehicle_idx].visits[start..=end].reverse();
-        false
-    }
 }
 
 /// Updates job with current solution.
