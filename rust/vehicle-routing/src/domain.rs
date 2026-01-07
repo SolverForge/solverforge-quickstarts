@@ -727,4 +727,102 @@ impl VehicleRoutePlan {
     pub fn total_driving_time_all(&self) -> i64 {
         self.vehicles.iter().map(|v| self.total_driving_time(v)).sum()
     }
+
+    /// Updates all shadow variables and cached aggregates.
+    ///
+    /// Call this after modifying vehicle routes to maintain consistency.
+    /// Updates: vehicle_idx, previous_visit_idx, arrival_time on visits;
+    /// cached_total_demand, cached_driving_time on vehicles.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use vehicle_routing::domain::{Location, Visit, Vehicle, VehicleRoutePlan};
+    ///
+    /// let depot = Location::new(0, 0.0, 0.0);
+    /// let loc1 = Location::new(1, 0.0, 0.01);
+    /// let loc2 = Location::new(2, 0.0, 0.02);
+    ///
+    /// let locations = vec![depot.clone(), loc1.clone(), loc2.clone()];
+    /// let visits = vec![
+    ///     Visit::new(0, "A", loc1).with_demand(10),
+    ///     Visit::new(1, "B", loc2).with_demand(20),
+    /// ];
+    /// let mut vehicle = Vehicle::new(0, "V1", 100, depot);
+    /// vehicle.departure_time = 8 * 3600;
+    /// vehicle.visits = vec![0, 1];  // A -> B
+    ///
+    /// let mut plan = VehicleRoutePlan::new("test", locations, visits, vec![vehicle]);
+    /// plan.finalize();
+    /// plan.update_shadows();
+    ///
+    /// // Check shadow variables on visits
+    /// assert_eq!(plan.visits[0].vehicle_idx, Some(0));
+    /// assert_eq!(plan.visits[0].previous_visit_idx, None);  // First in route
+    /// assert!(plan.visits[0].arrival_time.is_some());
+    ///
+    /// assert_eq!(plan.visits[1].vehicle_idx, Some(0));
+    /// assert_eq!(plan.visits[1].previous_visit_idx, Some(0));  // After visit 0
+    ///
+    /// // Check cached aggregates on vehicle
+    /// assert_eq!(plan.vehicles[0].cached_total_demand, 30);  // 10 + 20
+    /// assert!(plan.vehicles[0].cached_driving_time > 0);
+    /// ```
+    pub fn update_shadows(&mut self) {
+        // Phase 1: Clear all shadow variables
+        for visit in &mut self.visits {
+            visit.vehicle_idx = None;
+            visit.previous_visit_idx = None;
+            visit.arrival_time = None;
+        }
+
+        // Phase 2: Update each vehicle's route
+        for vehicle_idx in 0..self.vehicles.len() {
+            let vehicle = &self.vehicles[vehicle_idx];
+            let visit_indices: Vec<usize> = vehicle.visits.iter().copied().collect();
+            let departure_time = vehicle.departure_time;
+            let depot_idx = vehicle.home_location.index;
+
+            // Update shadow variables on visits
+            let mut prev_departure = departure_time;
+            let mut prev_loc_idx = depot_idx;
+            let mut prev_visit_idx: Option<usize> = None;
+
+            for &visit_idx in &visit_indices {
+                if visit_idx >= self.visits.len() {
+                    continue;
+                }
+
+                // Compute arrival time
+                let visit_loc_idx = self.visits[visit_idx].location.index;
+                let travel = self.travel_time(prev_loc_idx, visit_loc_idx);
+                let arrival = prev_departure + travel;
+
+                // Update shadow variables
+                let visit = &mut self.visits[visit_idx];
+                visit.vehicle_idx = Some(vehicle_idx);
+                visit.previous_visit_idx = prev_visit_idx;
+                visit.arrival_time = Some(arrival);
+
+                // Compute departure for next iteration
+                let service_start = arrival.max(visit.min_start_time);
+                prev_departure = service_start + visit.service_duration;
+                prev_loc_idx = visit_loc_idx;
+                prev_visit_idx = Some(visit_idx);
+            }
+
+            // Update cached aggregates on vehicle
+            let total_demand: i32 = visit_indices
+                .iter()
+                .filter_map(|&idx| self.visits.get(idx))
+                .map(|v| v.demand)
+                .sum();
+
+            let driving_time = self.total_driving_time(&self.vehicles[vehicle_idx]);
+
+            let vehicle = &mut self.vehicles[vehicle_idx];
+            vehicle.cached_total_demand = total_demand;
+            vehicle.cached_driving_time = driving_time;
+        }
+    }
 }
