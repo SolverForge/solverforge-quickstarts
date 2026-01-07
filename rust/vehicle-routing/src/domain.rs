@@ -178,6 +178,12 @@ pub struct Visit {
     #[inverse_relation_shadow_variable(source_variable_name = "visits")]
     #[serde(skip)]
     pub vehicle_idx: Option<usize>,
+
+    /// Index of the previous visit in the route.
+    /// `None` if this is the first visit or unassigned.
+    #[previous_element_shadow_variable(source_variable_name = "visits")]
+    #[serde(skip)]
+    pub previous_visit_idx: Option<usize>,
 }
 
 impl Visit {
@@ -192,6 +198,7 @@ impl Visit {
             max_end_time: 24 * 3600,
             service_duration: 0,
             vehicle_idx: None,
+            previous_visit_idx: None,
         }
     }
 
