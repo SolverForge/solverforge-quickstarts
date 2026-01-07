@@ -168,6 +168,16 @@ pub struct Visit {
     /// Service duration in seconds.
     #[serde(rename = "serviceDuration")]
     pub service_duration: i64,
+
+    // =========================================================================
+    // Shadow Variables (auto-maintained by ShadowVariableSupport)
+    // =========================================================================
+
+    /// Index of the vehicle this visit is assigned to.
+    /// Updated automatically when visits list changes.
+    #[inverse_relation_shadow_variable(source_variable_name = "visits")]
+    #[serde(skip)]
+    pub vehicle_idx: Option<usize>,
 }
 
 impl Visit {
@@ -181,6 +191,7 @@ impl Visit {
             min_start_time: 0,
             max_end_time: 24 * 3600,
             service_duration: 0,
+            vehicle_idx: None,
         }
     }
 
