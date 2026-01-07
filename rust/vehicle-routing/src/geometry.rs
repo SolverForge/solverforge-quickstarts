@@ -167,16 +167,16 @@ pub struct EncodedSegment {
 /// use vehicle_routing::domain::{Location, Visit, Vehicle, VehicleRoutePlan};
 /// use vehicle_routing::geometry::encode_routes;
 ///
-/// let locations = vec![
-///     Location::new(0, 39.95, -75.16),  // Depot
-///     Location::new(1, 39.96, -75.17),  // Visit A
-///     Location::new(2, 39.94, -75.15),  // Visit B
-/// ];
+/// let depot = Location::new(0, 39.95, -75.16);
+/// let loc_a = Location::new(1, 39.96, -75.17);
+/// let loc_b = Location::new(2, 39.94, -75.15);
+///
+/// let locations = vec![depot.clone(), loc_a.clone(), loc_b.clone()];
 /// let visits = vec![
-///     Visit::new(0, "A", 1),
-///     Visit::new(1, "B", 2),
+///     Visit::new(0, "A", loc_a),
+///     Visit::new(1, "B", loc_b),
 /// ];
-/// let mut vehicle = Vehicle::new(0, "Alpha", 100, 0);
+/// let mut vehicle = Vehicle::new(0, "Alpha", 100, depot);
 /// vehicle.visits = vec![0, 1];  // A -> B
 ///
 /// let mut plan = VehicleRoutePlan::new("test", locations, visits, vec![vehicle]);
@@ -215,13 +215,13 @@ pub fn encode_routes(plan: &VehicleRoutePlan) -> Vec<EncodedSegment> {
 /// Returns empty if route geometries are not initialized.
 fn get_route_coords(plan: &VehicleRoutePlan, vehicle: &Vehicle) -> Vec<(f64, f64)> {
     let mut coords = Vec::new();
-    let depot_idx = vehicle.home_location_idx;
+    let depot_idx = vehicle.home_location.index;
 
     // Build the sequence of location indices: depot -> visits -> depot
     let visit_loc_indices: Vec<usize> = vehicle
         .visits
         .iter()
-        .filter_map(|&v| plan.get_visit(v).map(|visit| visit.location_idx))
+        .filter_map(|&v| plan.get_visit(v).map(|visit| visit.location.index))
         .collect();
 
     let route: Vec<usize> = std::iter::once(depot_idx)

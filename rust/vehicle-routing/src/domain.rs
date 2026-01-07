@@ -10,10 +10,8 @@
 //!
 //! # Design
 //!
-//! Uses index-based references for O(1) lookups:
-//! - `Visit.location_idx` references `VehicleRoutePlan.locations`
-//! - `Vehicle.home_location_idx` references `VehicleRoutePlan.locations`
-//! - `Vehicle.visits` contains visit indices into `VehicleRoutePlan.visits`
+//! All scoring uses direct access to the plan's travel time matrix.
+//! No global state or RwLock overhead.
 
 use serde::{Deserialize, Serialize};
 use solverforge::prelude::*;
@@ -53,6 +51,20 @@ pub struct Location {
     pub latitude: f64,
     /// Longitude in degrees (-180 to 180).
     pub longitude: f64,
+}
+
+impl PartialEq for Location {
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index
+    }
+}
+
+impl Eq for Location {}
+
+impl std::hash::Hash for Location {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.index.hash(state);
+    }
 }
 
 impl Location {
@@ -106,6 +118,7 @@ impl Location {
         // seconds = meters / (km/h * 1000 / 3600) = meters * 3.6 / km/h
         (meters * 3.6 / AVERAGE_SPEED_KMPH).round() as i64
     }
+
 }
 
 /// A customer visit with time window and demand constraints.
@@ -121,10 +134,12 @@ impl Location {
 /// # Examples
 ///
 /// ```
-/// use vehicle_routing::domain::Visit;
+/// use vehicle_routing::domain::{Visit, Location};
+///
+/// let location = Location::new(0, 39.95, -75.17);
 ///
 /// // A restaurant delivery: 6am-10am window, 5-minute service
-/// let visit = Visit::new(0, "Restaurant A", 0)
+/// let visit = Visit::new(0, "Restaurant A", location)
 ///     .with_demand(8)
 ///     .with_time_window(6 * 3600, 10 * 3600)
 ///     .with_service_duration(300);
@@ -139,8 +154,8 @@ pub struct Visit {
     pub index: usize,
     /// Customer name.
     pub name: String,
-    /// Index into `VehicleRoutePlan.locations`.
-    pub location_idx: usize,
+    /// The geographic location of this visit.
+    pub location: Location,
     /// Quantity demanded (must fit in vehicle capacity).
     pub demand: i32,
     /// Earliest service start time (seconds from midnight).
@@ -156,11 +171,11 @@ pub struct Visit {
 
 impl Visit {
     /// Creates a new visit with default time window (all day).
-    pub fn new(index: usize, name: impl Into<String>, location_idx: usize) -> Self {
+    pub fn new(index: usize, name: impl Into<String>, location: Location) -> Self {
         Self {
             index,
             name: name.into(),
-            location_idx,
+            location,
             demand: 1,
             min_start_time: 0,
             max_end_time: 24 * 3600,
@@ -186,19 +201,20 @@ impl Visit {
         self.service_duration = duration;
         self
     }
+
 }
 
 /// A delivery vehicle with capacity and assigned route.
 ///
 /// The route is stored as a list of visit indices in order.
-/// Arrival times are computed on-demand, not stored.
 ///
 /// # Examples
 ///
 /// ```
-/// use vehicle_routing::domain::Vehicle;
+/// use vehicle_routing::domain::{Vehicle, Location};
 ///
-/// let vehicle = Vehicle::new(0, "Truck 1", 100, 0)
+/// let depot = Location::new(0, 39.95, -75.17);
+/// let vehicle = Vehicle::new(0, "Truck 1", 100, depot)
 ///     .with_departure_time(8 * 3600);  // Departs at 8am
 ///
 /// assert_eq!(vehicle.capacity, 100);
@@ -214,9 +230,9 @@ pub struct Vehicle {
     pub name: String,
     /// Maximum capacity (sum of visit demands must not exceed).
     pub capacity: i32,
-    /// Index into `VehicleRoutePlan.locations` for home depot.
+    /// Home depot location.
     #[serde(rename = "homeLocation")]
-    pub home_location_idx: usize,
+    pub home_location: Location,
     /// Departure time from depot (seconds from midnight).
     #[serde(rename = "departureTime")]
     pub departure_time: i64,
@@ -227,12 +243,12 @@ pub struct Vehicle {
 
 impl Vehicle {
     /// Creates a new vehicle with empty route.
-    pub fn new(id: usize, name: impl Into<String>, capacity: i32, home_location_idx: usize) -> Self {
+    pub fn new(id: usize, name: impl Into<String>, capacity: i32, home_location: Location) -> Self {
         Self {
             id,
             name: name.into(),
             capacity,
-            home_location_idx,
+            home_location,
             departure_time: 8 * 3600, // Default 8am
             visits: Vec::new(),
         }
@@ -242,32 +258,6 @@ impl Vehicle {
     pub fn with_departure_time(mut self, time: i64) -> Self {
         self.departure_time = time;
         self
-    }
-
-    /// Calculates total demand of all visits in the route.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use vehicle_routing::domain::{Vehicle, Visit, VehicleRoutePlan, Location};
-    ///
-    /// let locations = vec![Location::new(0, 0.0, 0.0)];
-    /// let visits = vec![
-    ///     Visit::new(0, "A", 0).with_demand(5),
-    ///     Visit::new(1, "B", 0).with_demand(3),
-    /// ];
-    /// let mut vehicle = Vehicle::new(0, "V1", 100, 0);
-    /// vehicle.visits = vec![0, 1];
-    ///
-    /// let plan = VehicleRoutePlan::new("test", locations, visits, vec![vehicle]);
-    /// assert_eq!(plan.vehicles[0].total_demand(&plan), 8);
-    /// ```
-    pub fn total_demand(&self, plan: &VehicleRoutePlan) -> i32 {
-        self.visits
-            .iter()
-            .filter_map(|&idx| plan.visits.get(idx))
-            .map(|v| v.demand)
-            .sum()
     }
 }
 
@@ -285,22 +275,22 @@ pub struct VisitTiming {
 /// The complete vehicle routing solution.
 ///
 /// Contains all problem facts (locations, visits) and planning entities (vehicles).
-/// Precomputes a travel time matrix on `finalize()` for O(1) lookups.
+/// Call `finalize()` after construction to populate the travel time matrix.
 ///
 /// # Examples
 ///
 /// ```
 /// use vehicle_routing::domain::{Location, Visit, Vehicle, VehicleRoutePlan};
 ///
-/// let locations = vec![
-///     Location::new(0, 39.95, -75.17),  // Philadelphia (depot)
-///     Location::new(1, 40.00, -75.10),  // Customer 1
-/// ];
+/// let depot = Location::new(0, 39.95, -75.17);  // Philadelphia
+/// let customer_loc = Location::new(1, 40.00, -75.10);
+///
+/// let locations = vec![depot.clone(), customer_loc.clone()];
 /// let visits = vec![
-///     Visit::new(0, "Customer 1", 1).with_demand(5),
+///     Visit::new(0, "Customer 1", customer_loc).with_demand(5),
 /// ];
 /// let vehicles = vec![
-///     Vehicle::new(0, "Truck 1", 100, 0),
+///     Vehicle::new(0, "Truck 1", 100, depot),
 /// ];
 ///
 /// let mut plan = VehicleRoutePlan::new("Philadelphia", locations, visits, vehicles);
@@ -390,7 +380,7 @@ impl VehicleRoutePlan {
         ([min_lat, min_lon], [max_lat, max_lon])
     }
 
-    /// Populates the travel time matrix using haversine distances.
+    /// Populates travel time matrix using haversine distances.
     ///
     /// Must be called after construction and before solving.
     /// For real road routing, use `init_routing()` instead.
@@ -496,16 +486,16 @@ impl VehicleRoutePlan {
     /// ```
     /// use vehicle_routing::domain::{Location, Visit, Vehicle, VehicleRoutePlan};
     ///
-    /// let locations = vec![
-    ///     Location::new(0, 0.0, 0.0),  // Depot
-    ///     Location::new(1, 0.0, 0.01), // ~1.1 km away
-    /// ];
+    /// let depot = Location::new(0, 0.0, 0.0);
+    /// let customer_loc = Location::new(1, 0.0, 0.01); // ~1.1 km away
+    ///
+    /// let locations = vec![depot.clone(), customer_loc.clone()];
     /// let visits = vec![
-    ///     Visit::new(0, "A", 1)
+    ///     Visit::new(0, "A", customer_loc)
     ///         .with_service_duration(300)
     ///         .with_time_window(0, 86400),
     /// ];
-    /// let mut vehicle = Vehicle::new(0, "V1", 100, 0);
+    /// let mut vehicle = Vehicle::new(0, "V1", 100, depot);
     /// vehicle.departure_time = 8 * 3600; // 8am
     /// vehicle.visits = vec![0];
     ///
@@ -520,7 +510,7 @@ impl VehicleRoutePlan {
     pub fn calculate_route_times(&self, vehicle: &Vehicle) -> Vec<VisitTiming> {
         let mut timings = Vec::with_capacity(vehicle.visits.len());
         let mut current_time = vehicle.departure_time;
-        let mut current_loc = vehicle.home_location_idx;
+        let mut current_loc = vehicle.home_location.index;
 
         for &visit_idx in &vehicle.visits {
             let Some(visit) = self.visits.get(visit_idx) else {
@@ -528,7 +518,7 @@ impl VehicleRoutePlan {
             };
 
             // Travel to this visit
-            let travel = self.travel_time(current_loc, visit.location_idx);
+            let travel = self.travel_time(current_loc, visit.location.index);
             let arrival = current_time + travel;
 
             // Service starts at max(arrival, min_start_time)
@@ -542,7 +532,7 @@ impl VehicleRoutePlan {
             });
 
             current_time = departure;
-            current_loc = visit.location_idx;
+            current_loc = visit.location.index;
         }
 
         timings
@@ -557,17 +547,17 @@ impl VehicleRoutePlan {
         }
 
         let mut total = 0i64;
-        let mut current_loc = vehicle.home_location_idx;
+        let mut current_loc = vehicle.home_location.index;
 
         for &visit_idx in &vehicle.visits {
             if let Some(visit) = self.visits.get(visit_idx) {
-                total += self.travel_time(current_loc, visit.location_idx);
-                current_loc = visit.location_idx;
+                total += self.travel_time(current_loc, visit.location.index);
+                current_loc = visit.location.index;
             }
         }
 
         // Return to depot
-        total += self.travel_time(current_loc, vehicle.home_location_idx);
+        total += self.travel_time(current_loc, vehicle.home_location.index);
         total
     }
 

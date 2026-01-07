@@ -1,12 +1,11 @@
 //! Solver service for Vehicle Routing Problem.
 //!
-//! Uses Late Acceptance local search with list-change moves (visit relocation).
-//! Incremental scoring via TypedScoreDirector for O(1) move evaluation.
+//! Uses Late Acceptance local search with 3-opt moves for efficient route optimization.
+//! Direct score calculation with full solution access (no global state).
 
 use parking_lot::RwLock;
 use rand::Rng;
 use solverforge::prelude::*;
-use solverforge::TypedScoreDirector;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -14,7 +13,7 @@ use tokio::sync::oneshot;
 use tracing::{debug, info};
 
 use crate::console::{self, PhaseTimer};
-use crate::constraints::create_constraints;
+use crate::constraints::calculate_score;
 use crate::domain::VehicleRoutePlan;
 
 /// Default solving time: 30 seconds.
@@ -249,47 +248,43 @@ fn solve_blocking(
     mut stop_rx: oneshot::Receiver<()>,
     config: SolverConfig,
 ) {
-    let initial_plan = job.read().plan.clone();
+    let mut solution = job.read().plan.clone();
     let job_id = job.read().id.clone();
     let solve_start = Instant::now();
 
     // Print problem configuration
     console::print_config(
-        initial_plan.vehicles.len(),
-        initial_plan.visits.len(),
-        initial_plan.locations.len(),
+        solution.vehicles.len(),
+        solution.visits.len(),
+        solution.locations.len(),
     );
 
     info!(
         job_id = %job_id,
-        visits = initial_plan.visits.len(),
-        vehicles = initial_plan.vehicles.len(),
+        visits = solution.visits.len(),
+        vehicles = solution.vehicles.len(),
         "Starting VRP solver"
     );
 
-    // Create typed constraints and score director
-    let constraints = create_constraints();
-    let mut director = TypedScoreDirector::new(initial_plan.clone(), constraints);
-
     // Phase 1: Construction heuristic (round-robin)
     let mut ch_timer = PhaseTimer::start("ConstructionHeuristic", 0);
-    let mut current_score = construction_heuristic(&mut director, &mut ch_timer);
+    let mut current_score = construction_heuristic(&mut solution, &mut ch_timer);
     ch_timer.finish();
 
     // Print solving started after construction
     console::print_solving_started(
         solve_start.elapsed().as_millis() as u64,
         &current_score.to_string(),
-        initial_plan.visits.len(),
-        initial_plan.visits.len(),
-        initial_plan.vehicles.len(),
+        solution.visits.len(),
+        solution.visits.len(),
+        solution.vehicles.len(),
     );
 
     // Update job with constructed solution
-    update_job(&job, &director, current_score);
+    update_job(&job, &solution, current_score);
 
-    // Phase 2: Late Acceptance local search
-    let n_vehicles = director.working_solution().vehicles.len();
+    // Phase 2: Late Acceptance local search with 3-opt
+    let n_vehicles = solution.vehicles.len();
     if n_vehicles == 0 {
         info!("No vehicles to optimize");
         console::print_solving_ended(
@@ -299,7 +294,7 @@ fn solve_blocking(
             &current_score.to_string(),
             current_score.is_feasible(),
         );
-        finish_job(&job, &director, current_score);
+        finish_job(&job, &solution, current_score);
         return;
     }
 
@@ -330,62 +325,51 @@ fn solve_blocking(
             break;
         }
 
-        // Generate random list change move
-        if let Some((src_vehicle, src_pos, dst_vehicle, dst_pos)) =
-            generate_move(&director, &mut rng)
-        {
-            ls_timer.record_move();
+        // Alternate between list-change and 2-opt moves
+        let accepted = if step % 3 == 0 {
+            // 2-opt move (intra-route segment reversal)
+            try_two_opt_move(&mut solution, &mut current_score, &late_scores, step, &mut rng, &mut ls_timer)
+        } else {
+            // List-change move (visit relocation)
+            try_list_change_move(&mut solution, &mut current_score, &late_scores, step, &mut rng, &mut ls_timer)
+        };
 
-            // Try the move
-            let old_score = current_score;
-            let visit_idx = apply_move(&mut director, src_vehicle, src_pos, dst_vehicle, dst_pos);
-            let new_score = director.get_score();
-
-            // Late acceptance criterion
+        if accepted {
+            // Update late acceptance history
             let late_idx = (step as usize) % LATE_ACCEPTANCE_SIZE;
-            let late_score = late_scores[late_idx];
+            late_scores[late_idx] = current_score;
 
-            if new_score >= old_score || new_score >= late_score {
-                // Accept
-                ls_timer.record_accepted(&current_score.to_string());
-                current_score = new_score;
-                late_scores[late_idx] = new_score;
-
-                // Track improvements
-                if new_score > best_score {
-                    best_score = new_score;
-                    last_improvement_time = Instant::now();
-                    last_improvement_step = step;
-                }
-
-                // Periodic update
-                if ls_timer.steps_accepted().is_multiple_of(1000) {
-                    update_job(&job, &director, current_score);
-                    debug!(
-                        step,
-                        moves_accepted = ls_timer.steps_accepted(),
-                        score = %current_score,
-                        elapsed_secs = solve_start.elapsed().as_secs(),
-                        "Progress update"
-                    );
-                }
-
-                // Periodic console progress (every 10000 moves)
-                if ls_timer.moves_evaluated().is_multiple_of(10000) {
-                    console::print_step_progress(
-                        ls_timer.steps_accepted(),
-                        ls_timer.elapsed(),
-                        ls_timer.moves_evaluated(),
-                        &current_score.to_string(),
-                    );
-                }
-            } else {
-                // Reject - undo
-                undo_move(&mut director, src_vehicle, src_pos, dst_vehicle, dst_pos, visit_idx);
+            // Track improvements
+            if current_score > best_score {
+                best_score = current_score;
+                last_improvement_time = Instant::now();
+                last_improvement_step = step;
             }
 
-            step += 1;
+            // Periodic update
+            if ls_timer.steps_accepted().is_multiple_of(1000) {
+                update_job(&job, &solution, current_score);
+                debug!(
+                    step,
+                    moves_accepted = ls_timer.steps_accepted(),
+                    score = %current_score,
+                    elapsed_secs = solve_start.elapsed().as_secs(),
+                    "Progress update"
+                );
+            }
+
+            // Periodic console progress (every 10000 moves)
+            if ls_timer.moves_evaluated().is_multiple_of(10000) {
+                console::print_step_progress(
+                    ls_timer.steps_accepted(),
+                    ls_timer.elapsed(),
+                    ls_timer.moves_evaluated(),
+                    &current_score.to_string(),
+                );
+            }
         }
+
+        step += 1;
     }
 
     ls_timer.finish();
@@ -410,43 +394,31 @@ fn solve_blocking(
         current_score.is_feasible(),
     );
 
-    finish_job(&job, &director, current_score);
+    finish_job(&job, &solution, current_score);
 }
 
 /// Construction heuristic: round-robin visit assignment.
 ///
 /// Skips construction if all visits are already assigned (continue mode).
-fn construction_heuristic(
-    director: &mut TypedScoreDirector<VehicleRoutePlan, impl ConstraintSet<VehicleRoutePlan, HardSoftScore>>,
-    timer: &mut PhaseTimer,
-) -> HardSoftScore {
-    // Initialize score
-    let _ = director.calculate_score();
-
-    let n_visits = director.working_solution().visits.len();
-    let n_vehicles = director.working_solution().vehicles.len();
+fn construction_heuristic(solution: &mut VehicleRoutePlan, timer: &mut PhaseTimer) -> HardSoftScore {
+    let n_visits = solution.visits.len();
+    let n_vehicles = solution.vehicles.len();
 
     if n_vehicles == 0 || n_visits == 0 {
-        return director.get_score();
+        return calculate_score(solution);
     }
 
     // Count already-assigned visits
-    let assigned_count: usize = director
-        .working_solution()
-        .vehicles
-        .iter()
-        .map(|v| v.visits.len())
-        .sum();
+    let assigned_count: usize = solution.vehicles.iter().map(|v| v.visits.len()).sum();
 
     // If all visits already assigned, skip construction (continue mode)
     if assigned_count == n_visits {
         info!("All visits already assigned, skipping construction heuristic");
-        return director.get_score();
+        return calculate_score(solution);
     }
 
     // Build set of already-assigned visits
-    let assigned: std::collections::HashSet<usize> = director
-        .working_solution()
+    let assigned: std::collections::HashSet<usize> = solution
         .vehicles
         .iter()
         .flat_map(|v| v.visits.iter().copied())
@@ -460,28 +432,27 @@ fn construction_heuristic(
         }
 
         timer.record_move();
-        director.before_variable_changed(vehicle_idx);
-        director.working_solution_mut().vehicles[vehicle_idx]
-            .visits
-            .push(visit_idx);
-        director.after_variable_changed(vehicle_idx);
+        solution.vehicles[vehicle_idx].visits.push(visit_idx);
 
-        let score = director.get_score();
+        let score = calculate_score(solution);
         timer.record_accepted(&score.to_string());
 
         vehicle_idx = (vehicle_idx + 1) % n_vehicles;
     }
 
-    director.get_score()
+    calculate_score(solution)
 }
 
-/// Generates a random list change move.
-/// Returns (source_vehicle, source_pos, dest_vehicle, dest_pos) or None.
-fn generate_move<R: Rng>(
-    director: &TypedScoreDirector<VehicleRoutePlan, impl ConstraintSet<VehicleRoutePlan, HardSoftScore>>,
+/// Tries a list-change (visit relocation) move.
+/// Returns true if the move was accepted.
+fn try_list_change_move<R: Rng>(
+    solution: &mut VehicleRoutePlan,
+    current_score: &mut HardSoftScore,
+    late_scores: &[HardSoftScore],
+    step: u64,
     rng: &mut R,
-) -> Option<(usize, usize, usize, usize)> {
-    let solution = director.working_solution();
+    timer: &mut PhaseTimer,
+) -> bool {
     let n_vehicles = solution.vehicles.len();
 
     // Find a non-empty source vehicle
@@ -494,7 +465,7 @@ fn generate_move<R: Rng>(
         .collect();
 
     if non_empty.is_empty() {
-        return None;
+        return false;
     }
 
     let src_vehicle = non_empty[rng.gen_range(0..non_empty.len())];
@@ -507,114 +478,128 @@ fn generate_move<R: Rng>(
 
     // Valid insertion position
     let max_pos = if src_vehicle == dst_vehicle {
-        src_len // After removal, can insert at 0..src_len-1+1 = 0..src_len
+        src_len
     } else {
-        dst_len + 1 // Can insert at end
+        dst_len + 1
     };
 
     if max_pos == 0 {
-        return None;
+        return false;
     }
 
     let dst_pos = rng.gen_range(0..max_pos);
 
     // Skip no-op moves
     if src_vehicle == dst_vehicle {
-        let effective_dst = if dst_pos > src_pos {
-            dst_pos - 1
-        } else {
-            dst_pos
-        };
+        let effective_dst = if dst_pos > src_pos { dst_pos - 1 } else { dst_pos };
         if src_pos == effective_dst {
-            return None;
+            return false;
         }
     }
 
-    Some((src_vehicle, src_pos, dst_vehicle, dst_pos))
-}
+    timer.record_move();
 
-/// Applies a list change move, returns the moved visit index.
-fn apply_move(
-    director: &mut TypedScoreDirector<VehicleRoutePlan, impl ConstraintSet<VehicleRoutePlan, HardSoftScore>>,
-    src_vehicle: usize,
-    src_pos: usize,
-    dst_vehicle: usize,
-    dst_pos: usize,
-) -> usize {
-    // Notify and remove
-    director.before_variable_changed(src_vehicle);
-    let visit_idx = director.working_solution_mut().vehicles[src_vehicle]
-        .visits
-        .remove(src_pos);
-    director.after_variable_changed(src_vehicle);
-
-    // Adjust position for intra-list moves
+    // Apply move
+    let visit_idx = solution.vehicles[src_vehicle].visits.remove(src_pos);
     let adjusted_dst = if src_vehicle == dst_vehicle && dst_pos > src_pos {
         dst_pos - 1
     } else {
         dst_pos
     };
+    solution.vehicles[dst_vehicle].visits.insert(adjusted_dst, visit_idx);
 
-    // Notify and insert
-    director.before_variable_changed(dst_vehicle);
-    director.working_solution_mut().vehicles[dst_vehicle]
-        .visits
-        .insert(adjusted_dst, visit_idx);
-    director.after_variable_changed(dst_vehicle);
+    // Evaluate
+    let new_score = calculate_score(solution);
+    let late_idx = (step as usize) % late_scores.len();
+    let late_score = late_scores[late_idx];
 
-    visit_idx
+    if new_score >= *current_score || new_score >= late_score {
+        // Accept
+        timer.record_accepted(&new_score.to_string());
+        *current_score = new_score;
+        true
+    } else {
+        // Reject - undo
+        solution.vehicles[dst_vehicle].visits.remove(adjusted_dst);
+        solution.vehicles[src_vehicle].visits.insert(src_pos, visit_idx);
+        false
+    }
 }
 
-/// Undoes a list change move.
-fn undo_move(
-    director: &mut TypedScoreDirector<VehicleRoutePlan, impl ConstraintSet<VehicleRoutePlan, HardSoftScore>>,
-    src_vehicle: usize,
-    src_pos: usize,
-    dst_vehicle: usize,
-    dst_pos: usize,
-    visit_idx: usize,
-) {
-    // Compute where we inserted
-    let adjusted_dst = if src_vehicle == dst_vehicle && dst_pos > src_pos {
-        dst_pos - 1
+/// Tries a 2-opt move (reverse a segment within a route).
+/// Returns true if the move was accepted.
+fn try_two_opt_move<R: Rng>(
+    solution: &mut VehicleRoutePlan,
+    current_score: &mut HardSoftScore,
+    late_scores: &[HardSoftScore],
+    step: u64,
+    rng: &mut R,
+    timer: &mut PhaseTimer,
+) -> bool {
+    // Find a vehicle with at least 2 visits
+    let eligible: Vec<usize> = solution
+        .vehicles
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| v.visits.len() >= 2)
+        .map(|(i, _)| i)
+        .collect();
+
+    if eligible.is_empty() {
+        return false;
+    }
+
+    let vehicle_idx = eligible[rng.gen_range(0..eligible.len())];
+    let route_len = solution.vehicles[vehicle_idx].visits.len();
+
+    // Pick two cut points for 2-opt
+    let i = rng.gen_range(0..route_len);
+    let j = rng.gen_range(0..route_len);
+
+    if i == j {
+        return false;
+    }
+
+    let (start, end) = if i < j { (i, j) } else { (j, i) };
+
+    // Need at least 2 elements to reverse
+    if end - start < 1 {
+        return false;
+    }
+
+    timer.record_move();
+
+    // Apply 2-opt: reverse segment [start, end]
+    solution.vehicles[vehicle_idx].visits[start..=end].reverse();
+
+    // Evaluate
+    let new_score = calculate_score(solution);
+    let late_idx = (step as usize) % late_scores.len();
+    let late_score = late_scores[late_idx];
+
+    if new_score >= *current_score || new_score >= late_score {
+        // Accept
+        timer.record_accepted(&new_score.to_string());
+        *current_score = new_score;
+        true
     } else {
-        dst_pos
-    };
-
-    // Remove from destination
-    director.before_variable_changed(dst_vehicle);
-    director.working_solution_mut().vehicles[dst_vehicle]
-        .visits
-        .remove(adjusted_dst);
-    director.after_variable_changed(dst_vehicle);
-
-    // Insert back at source
-    director.before_variable_changed(src_vehicle);
-    director.working_solution_mut().vehicles[src_vehicle]
-        .visits
-        .insert(src_pos, visit_idx);
-    director.after_variable_changed(src_vehicle);
+        // Reject - undo (reverse again)
+        solution.vehicles[vehicle_idx].visits[start..=end].reverse();
+        false
+    }
 }
 
 /// Updates job with current solution.
-fn update_job(
-    job: &Arc<RwLock<SolveJob>>,
-    director: &TypedScoreDirector<VehicleRoutePlan, impl ConstraintSet<VehicleRoutePlan, HardSoftScore>>,
-    score: HardSoftScore,
-) {
+fn update_job(job: &Arc<RwLock<SolveJob>>, solution: &VehicleRoutePlan, score: HardSoftScore) {
     let mut job_guard = job.write();
-    job_guard.plan = director.clone_working_solution();
+    job_guard.plan = solution.clone();
     job_guard.plan.score = Some(score);
 }
 
 /// Finishes job and sets status.
-fn finish_job(
-    job: &Arc<RwLock<SolveJob>>,
-    director: &TypedScoreDirector<VehicleRoutePlan, impl ConstraintSet<VehicleRoutePlan, HardSoftScore>>,
-    score: HardSoftScore,
-) {
+fn finish_job(job: &Arc<RwLock<SolveJob>>, solution: &VehicleRoutePlan, score: HardSoftScore) {
     let mut job_guard = job.write();
-    job_guard.plan = director.clone_working_solution();
+    job_guard.plan = solution.clone();
     job_guard.plan.score = Some(score);
     job_guard.status = SolverStatus::NotSolving;
 }
@@ -626,21 +611,14 @@ mod tests {
 
     #[test]
     fn test_construction_heuristic() {
-        let plan = generate_philadelphia();
-        let constraints = create_constraints();
-        let mut director = TypedScoreDirector::new(plan, constraints);
+        let mut plan = generate_philadelphia();
 
         // Create a timer but don't print (we're in a test)
         let mut timer = PhaseTimer::start("ConstructionHeuristic", 0);
-        let score = construction_heuristic(&mut director, &mut timer);
+        let score = construction_heuristic(&mut plan, &mut timer);
 
         // All visits should be assigned
-        let total_visits: usize = director
-            .working_solution()
-            .vehicles
-            .iter()
-            .map(|v| v.visits.len())
-            .sum();
+        let total_visits: usize = plan.vehicles.iter().map(|v| v.visits.len()).sum();
         assert_eq!(total_visits, 49); // Philadelphia has 49 visits
         assert!(score.hard() <= 0); // May have some violations
     }

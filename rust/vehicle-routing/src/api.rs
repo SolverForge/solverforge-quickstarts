@@ -420,16 +420,16 @@ impl RoutePlanDto {
         let mut visit_timings: HashMap<usize, (i64, i64, i64, i32)> = HashMap::new(); // (arrival, service_start, departure, driving_time)
         for v in &plan.vehicles {
             let timings = plan.calculate_route_times(v);
-            let mut prev_loc = v.home_location_idx;
+            let mut prev_loc = v.home_location.index;
 
             for timing in timings.iter() {
-                let driving_time = plan.travel_time(prev_loc, plan.visits[timing.visit_idx].location_idx);
+                let driving_time = plan.travel_time(prev_loc, plan.visits[timing.visit_idx].location.index);
                 let service_start = timing.arrival.max(plan.visits[timing.visit_idx].min_start_time);
                 visit_timings.insert(
                     timing.visit_idx,
                     (timing.arrival, service_start, timing.departure, driving_time as i32),
                 );
-                prev_loc = plan.visits[timing.visit_idx].location_idx;
+                prev_loc = plan.visits[timing.visit_idx].location.index;
             }
         }
 
@@ -438,7 +438,7 @@ impl RoutePlanDto {
             .visits
             .iter()
             .filter_map(|visit| {
-                let loc = plan.locations.get(visit.location_idx)?;
+                let loc = plan.locations.get(visit.location.index)?;
                 let (vehicle_id, vehicle_pos) = visit_vehicle.get(&visit.index).cloned().unzip();
                 let vehicle_for_visit = vehicle_id.as_ref().and_then(|vid| {
                     plan.vehicles.iter().find(|v| v.id.to_string() == *vid)
@@ -481,7 +481,7 @@ impl RoutePlanDto {
             .map(|v| {
                 let home_loc = plan
                     .locations
-                    .get(v.home_location_idx)
+                    .get(v.home_location.index)
                     .map(|l| [l.latitude, l.longitude])
                     .unwrap_or([0.0, 0.0]);
 
@@ -493,11 +493,19 @@ impl RoutePlanDto {
                     v.departure_time
                 } else if let Some(last_timing) = route_times.last() {
                     let last_visit = &plan.visits[last_timing.visit_idx];
-                    let return_travel = plan.travel_time(last_visit.location_idx, v.home_location_idx);
+                    let return_travel = plan.travel_time(last_visit.location.index, v.home_location.index);
                     last_timing.departure + return_travel
                 } else {
                     v.departure_time
                 };
+
+                // Compute total demand by summing visit demands
+                let total_demand: i32 = v
+                    .visits
+                    .iter()
+                    .filter_map(|&idx| plan.visits.get(idx))
+                    .map(|visit| visit.demand)
+                    .sum();
 
                 VehicleDto {
                     id: v.id.to_string(),
@@ -506,7 +514,7 @@ impl RoutePlanDto {
                     home_location: home_loc,
                     departure_time: seconds_to_iso(v.departure_time),
                     visits: v.visits.iter().map(|&idx| visit_id(idx)).collect(),
-                    total_demand: v.total_demand(plan),
+                    total_demand,
                     total_driving_time_seconds: total_driving as i32,
                     arrival_time: seconds_to_iso(arrival),
                 }
@@ -576,13 +584,14 @@ impl RoutePlanDto {
             ));
         }
 
-        // Build visits
+        // Build visits - now needs Location object, not index
         let visits: Vec<Visit> = self
             .visits
             .iter()
             .enumerate()
             .map(|(i, vdto)| {
-                Visit::new(i, &vdto.name, visit_start_idx + i)
+                let loc = locations[visit_start_idx + i].clone();
+                Visit::new(i, &vdto.name, loc)
                     .with_demand(vdto.demand)
                     .with_time_window(
                         iso_to_seconds(&vdto.min_start_time),
@@ -592,7 +601,7 @@ impl RoutePlanDto {
             })
             .collect();
 
-        // Build vehicles
+        // Build vehicles - now needs Location object, not index
         let vehicles: Vec<Vehicle> = self
             .vehicles
             .iter()
@@ -603,6 +612,7 @@ impl RoutePlanDto {
                     (vdto.home_location[1] * 1e6) as i64,
                 );
                 let home_idx = depot_indices[&key];
+                let home_loc = locations[home_idx].clone();
 
                 // Map visit IDs to indices
                 let visit_indices: Vec<usize> = vdto
@@ -611,7 +621,7 @@ impl RoutePlanDto {
                     .filter_map(|vid| visit_id_to_idx.get(vid.as_str()).copied())
                     .collect();
 
-                let mut v = Vehicle::new(i, &vdto.name, vdto.capacity, home_idx);
+                let mut v = Vehicle::new(i, &vdto.name, vdto.capacity, home_loc);
                 v.departure_time = iso_to_seconds(&vdto.departure_time);
                 v.visits = visit_indices;
                 v
@@ -847,30 +857,46 @@ pub struct AnalyzeResponse {
     responses((status = 200, description = "Constraint analysis", body = AnalyzeResponse))
 )]
 async fn analyze_route_plan(Json(dto): Json<RoutePlanDto>) -> Json<AnalyzeResponse> {
-    use crate::constraints::{VehicleCapacityConstraint, TimeWindowConstraint, MinimizeTravelTimeConstraint};
-    use solverforge::IncrementalConstraint;
+    use crate::constraints::{calculate_late_minutes, calculate_excess_capacity};
 
     let plan = dto.to_domain();
 
-    // Evaluate each constraint
-    let cap = VehicleCapacityConstraint::new();
-    let tw = TimeWindowConstraint::new();
-    let travel = MinimizeTravelTimeConstraint::new();
+    // Calculate constraint scores
+    let cap_total: i64 = plan.vehicles.iter()
+        .map(|v| calculate_excess_capacity(&plan, v) as i64)
+        .sum();
 
-    let cap_score = cap.evaluate(&plan);
-    let tw_score = tw.evaluate(&plan);
-    let travel_score = travel.evaluate(&plan);
+    let tw_total: i64 = plan.vehicles.iter()
+        .map(|v| calculate_late_minutes(&plan, v))
+        .sum();
+
+    let travel_total: i64 = plan.vehicles.iter()
+        .map(|v| plan.total_driving_time(v))
+        .sum();
+
+    let cap_score = HardSoftScore::of_hard(-cap_total);
+    let tw_score = HardSoftScore::of_hard(-tw_total);
+    let travel_score = HardSoftScore::of_soft(-travel_total);
+
+    // Helper to compute total demand
+    let total_demand = |v: &Vehicle| -> i32 {
+        v.visits.iter()
+            .filter_map(|&idx| plan.visits.get(idx))
+            .map(|visit| visit.demand)
+            .sum()
+    };
 
     // Build detailed matches for capacity constraint
     let cap_matches: Vec<MatchAnalysisDto> = plan.vehicles.iter()
-        .filter(|v| v.total_demand(&plan) > v.capacity)
+        .filter(|v| total_demand(v) > v.capacity)
         .map(|v| {
-            let excess = v.total_demand(&plan) - v.capacity;
+            let demand = total_demand(v);
+            let excess = demand - v.capacity;
             MatchAnalysisDto {
                 name: "Vehicle capacity".to_string(),
                 score: format!("{}hard/0soft", -excess),
                 justification: format!("{} is over capacity by {} (demand {} > capacity {})",
-                    v.name, excess, v.total_demand(&plan), v.capacity),
+                    v.name, excess, demand, v.capacity),
             }
         })
         .collect();
@@ -990,11 +1016,9 @@ pub struct ApplyRecommendationRequest {
     responses((status = 200, description = "Recommendations", body = Vec<RecommendedAssignment>))
 )]
 async fn recommend_assignment(Json(request): Json<RecommendationRequest>) -> Json<Vec<RecommendedAssignment>> {
-    use crate::constraints::create_constraints;
-    use solverforge::ConstraintSet;
+    use crate::constraints::calculate_score;
 
     let mut plan = request.solution.to_domain();
-    let constraints = create_constraints();
 
     // Find the visit index by ID
     let visit_id_num: usize = request.visit_id.trim_start_matches('v').parse().unwrap_or(usize::MAX);
@@ -1009,7 +1033,7 @@ async fn recommend_assignment(Json(request): Json<RecommendationRequest>) -> Jso
     plan.finalize();
 
     // Get baseline score
-    let baseline = constraints.evaluate_all(&plan);
+    let baseline = calculate_score(&plan);
 
     // Try inserting at each position in each vehicle
     let mut recommendations: Vec<(RecommendedAssignment, HardSoftScore)> = Vec::new();
@@ -1021,7 +1045,7 @@ async fn recommend_assignment(Json(request): Json<RecommendationRequest>) -> Jso
             test_plan.vehicles[v_idx].visits.insert(insert_pos, visit_id_num);
             test_plan.finalize();
 
-            let new_score = constraints.evaluate_all(&test_plan);
+            let new_score = calculate_score(&test_plan);
             let diff = new_score - baseline;
 
             recommendations.push((
@@ -1072,10 +1096,8 @@ async fn apply_recommendation(Json(request): Json<ApplyRecommendationRequest>) -
     plan.finalize();
 
     // Recalculate score
-    use crate::constraints::create_constraints;
-    use solverforge::ConstraintSet;
-    let constraints = create_constraints();
-    plan.score = Some(constraints.evaluate_all(&plan));
+    use crate::constraints::calculate_score;
+    plan.score = Some(calculate_score(&plan));
 
     Json(RoutePlanDto::from_plan(&plan, None))
 }
