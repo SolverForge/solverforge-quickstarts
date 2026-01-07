@@ -237,6 +237,7 @@ pub struct Vehicle {
     #[serde(rename = "departureTime")]
     pub departure_time: i64,
     /// Ordered list of visit indices (the route).
+    #[planning_list_variable]
     #[serde(default)]
     pub visits: Vec<usize>,
 }
