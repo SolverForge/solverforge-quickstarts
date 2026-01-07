@@ -184,6 +184,12 @@ pub struct Visit {
     #[previous_element_shadow_variable(source_variable_name = "visits")]
     #[serde(skip)]
     pub previous_visit_idx: Option<usize>,
+
+    /// Computed arrival time at this visit (seconds from midnight).
+    /// Cascading update: depends on previous_visit_idx and vehicle departure.
+    #[cascading_update_shadow_variable]
+    #[serde(skip)]
+    pub arrival_time: Option<i64>,
 }
 
 impl Visit {
@@ -199,6 +205,7 @@ impl Visit {
             service_duration: 0,
             vehicle_idx: None,
             previous_visit_idx: None,
+            arrival_time: None,
         }
     }
 
