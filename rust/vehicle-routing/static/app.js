@@ -128,13 +128,24 @@ function loadDemoDataWithProgress(demoId) {
         const data = JSON.parse(event.data);
 
         if (data.event === "progress") {
+          // Map phases to icons for visual feedback
           let statusIcon = "";
-          if (data.phase === "network") {
-            statusIcon = '<i class="fas fa-download me-2"></i>';
-          } else if (data.phase === "routes") {
-            statusIcon = '<i class="fas fa-route me-2"></i>';
-          } else if (data.phase === "complete") {
-            statusIcon = '<i class="fas fa-check-circle me-2 text-success"></i>';
+          switch (data.phase) {
+            case "network":
+              statusIcon = '<i class="fas fa-download me-2"></i>';
+              break;
+            case "matrix":
+              statusIcon = '<i class="fas fa-calculator me-2"></i>';
+              break;
+            case "geometry":
+              statusIcon = '<i class="fas fa-route me-2"></i>';
+              break;
+            case "fallback":
+              statusIcon = '<i class="fas fa-exclamation-triangle me-2 text-warning"></i>';
+              break;
+            case "complete":
+              statusIcon = '<i class="fas fa-check-circle me-2 text-success"></i>';
+              break;
           }
           updateLoadingProgress(data.message, data.percent, data.detail || "");
         } else if (data.event === "complete") {
