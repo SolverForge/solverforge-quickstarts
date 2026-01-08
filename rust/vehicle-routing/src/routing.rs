@@ -432,6 +432,35 @@ out body;"#,
         &self,
         locations: &[(f64, f64)],
     ) -> HashMap<(usize, usize), Vec<(f64, f64)>> {
+        self.compute_all_geometries_with_progress(locations, |_, _| {})
+    }
+
+    /// Computes route geometries with row-level progress callback.
+    ///
+    /// The callback receives `(completed_row, total_rows)` after each source row is computed.
+    /// For n locations, this computes n*(n-1) routes, calling the callback n times.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use vehicle_routing::routing::RoadNetwork;
+    /// let network = RoadNetwork::new();
+    /// let locations = vec![(39.95, -75.16), (39.96, -75.17)];
+    /// let mut progress_calls = 0;
+    /// let geometries = network.compute_all_geometries_with_progress(&locations, |row, total| {
+    ///     progress_calls += 1;
+    ///     assert!(row < total);
+    /// });
+    /// assert_eq!(progress_calls, 2); // One call per source location
+    /// ```
+    pub fn compute_all_geometries_with_progress<F>(
+        &self,
+        locations: &[(f64, f64)],
+        mut on_row_complete: F,
+    ) -> HashMap<(usize, usize), Vec<(f64, f64)>>
+    where
+        F: FnMut(usize, usize),
+    {
         let n = locations.len();
         let mut geometries = HashMap::new();
 
@@ -444,6 +473,8 @@ out body;"#,
                     geometries.insert((i, j), result.geometry);
                 }
             }
+            // Report progress after each source row
+            on_row_complete(i, n);
         }
 
         geometries
@@ -453,6 +484,36 @@ out body;"#,
     ///
     /// Returns a matrix where `result[i][j]` is the travel time from location i to j.
     pub fn compute_matrix(&self, locations: &[(f64, f64)]) -> Vec<Vec<i64>> {
+        self.compute_matrix_with_progress(locations, |_, _| {})
+    }
+
+    /// Computes all-pairs travel time matrix with row-level progress callback.
+    ///
+    /// The callback receives `(completed_row, total_rows)` after each row is computed.
+    /// This enables progress reporting during the O(n) Dijkstra runs.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use vehicle_routing::routing::RoadNetwork;
+    /// let network = RoadNetwork::new();
+    /// let locations = vec![(39.95, -75.16), (39.96, -75.17)];
+    /// let mut progress_calls = 0;
+    /// let matrix = network.compute_matrix_with_progress(&locations, |row, total| {
+    ///     progress_calls += 1;
+    ///     assert!(row < total);
+    /// });
+    /// assert_eq!(progress_calls, 2); // One call per row
+    /// assert_eq!(matrix.len(), 2);
+    /// ```
+    pub fn compute_matrix_with_progress<F>(
+        &self,
+        locations: &[(f64, f64)],
+        mut on_row_complete: F,
+    ) -> Vec<Vec<i64>>
+    where
+        F: FnMut(usize, usize),
+    {
         let n = locations.len();
         let mut matrix = vec![vec![0i64; n]; n];
 
@@ -462,7 +523,7 @@ out body;"#,
             .map(|&(lat, lng)| self.snap_to_road(lat, lng))
             .collect();
 
-        // Compute travel times
+        // Compute travel times row by row
         for i in 0..n {
             if let Some(from_node) = nodes[i] {
                 // Run Dijkstra from this node
@@ -504,6 +565,9 @@ out body;"#,
                     matrix[i][j] = (dist / DEFAULT_SPEED_MPS).round() as i64;
                 }
             }
+
+            // Report progress after each row
+            on_row_complete(i, n);
         }
 
         matrix
