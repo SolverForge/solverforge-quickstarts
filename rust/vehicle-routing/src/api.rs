@@ -210,7 +210,15 @@ async fn get_demo_data(Path(name): Path<String>) -> Result<Json<RoutePlanDto>, S
 /// Returns Server-Sent Events (SSE) stream with progress and final solution.
 /// Downloads OSM road network and computes real driving times.
 /// Compatible with frontend's EventSource API.
+///
+/// Progress phases:
+/// - `network` (0-15%): Loading road network from cache or downloading
+/// - `matrix` (15-75%): Computing travel time matrix (Dijkstra per location)
+/// - `geometry` (75-95%): Computing route geometries for visualization
+/// - `complete` (100%): Ready
 async fn get_demo_data_stream(Path(name): Path<String>) -> impl IntoResponse {
+    use crate::routing::{BoundingBox, RoadNetwork};
+
     // Generate the demo data
     let mut plan = match generate_by_name(&name) {
         Some(p) => p,
@@ -225,30 +233,130 @@ async fn get_demo_data_stream(Path(name): Path<String>) -> impl IntoResponse {
         }
     };
 
-    // Build SSE stream with async routing
+    // Build bounding box from plan
+    let bbox = BoundingBox::new(
+        plan.south_west_corner[0],
+        plan.south_west_corner[1],
+        plan.north_east_corner[0],
+        plan.north_east_corner[1],
+    )
+    .expand(0.05);
+
+    // Extract coordinates for routing
+    let coords: Vec<(f64, f64)> = plan
+        .locations
+        .iter()
+        .map(|l| (l.latitude, l.longitude))
+        .collect();
+    let n = coords.len();
+
+    // Build SSE stream with granular progress
     let stream = async_stream::stream! {
-        // Progress: downloading
+        // Phase 1: Network loading (0-15%)
         yield Ok::<_, std::convert::Infallible>(
-            "data: {\"event\":\"progress\",\"phase\":\"downloading\",\"message\":\"Downloading road network...\",\"percent\":20}\n\n".to_string()
+            format!("data: {{\"event\":\"progress\",\"phase\":\"network\",\"message\":\"Loading road network...\",\"percent\":5,\"detail\":\"{} locations\"}}\n\n", n)
         );
 
-        // Initialize routing (downloads OSM, builds graph, computes matrix)
-        let routing_result = plan.init_routing().await;
+        let network = match RoadNetwork::load_or_fetch(&bbox).await {
+            Ok(net) => {
+                yield Ok(format!(
+                    "data: {{\"event\":\"progress\",\"phase\":\"network\",\"message\":\"Road network ready\",\"percent\":15,\"detail\":\"{} nodes, {} edges\"}}\n\n",
+                    net.node_count(), net.edge_count()
+                ));
+                net
+            }
+            Err(e) => {
+                tracing::warn!("Road routing failed, using haversine: {}", e);
+                plan.finalize();
+                yield Ok("data: {\"event\":\"progress\",\"phase\":\"fallback\",\"message\":\"Using straight-line distances\",\"percent\":95}\n\n".to_string());
 
-        if let Err(e) = routing_result {
-            // Routing failed, fall back to haversine
-            tracing::warn!("Road routing failed, using haversine: {}", e);
-            plan.finalize();
-            yield Ok("data: {\"event\":\"progress\",\"phase\":\"fallback\",\"message\":\"Using straight-line distances\",\"percent\":80}\n\n".to_string());
-        } else {
-            yield Ok("data: {\"event\":\"progress\",\"phase\":\"computing\",\"message\":\"Computing travel times...\",\"percent\":80}\n\n".to_string());
+                // Build response DTO and complete
+                let dto = RoutePlanDto::from_plan(&plan, None);
+                let solution_json = serde_json::to_string(&dto).unwrap_or_else(|_| "{}".to_string());
+                yield Ok(format!(
+                    "data: {{\"event\":\"progress\",\"phase\":\"complete\",\"message\":\"Ready!\",\"percent\":100}}\n\n\
+                     data: {{\"event\":\"complete\",\"solution\":{}}}\n\n",
+                    solution_json
+                ));
+                return;
+            }
+        };
+
+        // Phase 2: Matrix computation (15-75%) via channel for real-time progress
+        let (matrix_tx, mut matrix_rx) = tokio::sync::mpsc::unbounded_channel::<(usize, usize)>();
+        let network_for_matrix = std::sync::Arc::clone(&network);
+        let coords_for_matrix = coords.clone();
+
+        let matrix_handle = tokio::task::spawn_blocking(move || {
+            network_for_matrix.compute_matrix_with_progress(&coords_for_matrix, |row, total| {
+                let _ = matrix_tx.send((row, total));
+            })
+        });
+
+        // Stream matrix progress
+        while let Some((row, total)) = matrix_rx.recv().await {
+            // Progress from 15% to 75% (60% range)
+            let pct = 15 + (row + 1) * 60 / total;
+            yield Ok(format!(
+                "data: {{\"event\":\"progress\",\"phase\":\"matrix\",\"message\":\"Computing routes\",\"percent\":{},\"detail\":\"{}/{} locations\"}}\n\n",
+                pct, row + 1, total
+            ));
         }
+
+        // Get matrix result
+        let matrix = match matrix_handle.await {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!("Matrix computation failed: {}", e);
+                plan.finalize();
+                let dto = RoutePlanDto::from_plan(&plan, None);
+                let solution_json = serde_json::to_string(&dto).unwrap_or_else(|_| "{}".to_string());
+                yield Ok(format!(
+                    "data: {{\"event\":\"progress\",\"phase\":\"complete\",\"message\":\"Ready (fallback)\",\"percent\":100}}\n\n\
+                     data: {{\"event\":\"complete\",\"solution\":{}}}\n\n",
+                    solution_json
+                ));
+                return;
+            }
+        };
+        plan.travel_time_matrix = matrix;
+
+        // Phase 3: Geometry computation (75-95%) via channel
+        let (geo_tx, mut geo_rx) = tokio::sync::mpsc::unbounded_channel::<(usize, usize)>();
+        let network_for_geo = std::sync::Arc::clone(&network);
+        let coords_for_geo = coords.clone();
+
+        let geo_handle = tokio::task::spawn_blocking(move || {
+            network_for_geo.compute_all_geometries_with_progress(&coords_for_geo, |row, total| {
+                let _ = geo_tx.send((row, total));
+            })
+        });
+
+        // Stream geometry progress
+        while let Some((row, total)) = geo_rx.recv().await {
+            // Progress from 75% to 95% (20% range)
+            let pct = 75 + (row + 1) * 20 / total;
+            yield Ok(format!(
+                "data: {{\"event\":\"progress\",\"phase\":\"geometry\",\"message\":\"Generating routes\",\"percent\":{},\"detail\":\"{}/{} paths\"}}\n\n",
+                pct, row + 1, total
+            ));
+        }
+
+        // Get geometry result
+        let geometries = match geo_handle.await {
+            Ok(g) => g,
+            Err(e) => {
+                tracing::error!("Geometry computation failed: {}", e);
+                std::collections::HashMap::new()
+            }
+        };
+        plan.route_geometries = geometries;
 
         // Build response DTO
         let dto = RoutePlanDto::from_plan(&plan, None);
         let solution_json = serde_json::to_string(&dto).unwrap_or_else(|_| "{}".to_string());
 
-        // Complete
+        // Complete (100%)
         yield Ok(format!(
             "data: {{\"event\":\"progress\",\"phase\":\"complete\",\"message\":\"Ready!\",\"percent\":100}}\n\n\
              data: {{\"event\":\"complete\",\"solution\":{}}}\n\n",
