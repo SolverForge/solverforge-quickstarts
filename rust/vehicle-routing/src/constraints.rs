@@ -12,7 +12,7 @@ use solverforge::prelude::*;
 use solverforge::stream::ConstraintFactory;
 use solverforge::ConstraintSet;
 
-use crate::domain::{Vehicle, VehicleRoutePlan, Visit};
+use crate::domain::{Vehicle, VehicleRoutePlan};
 
 /// Creates the constraint set for vehicle routing.
 ///
@@ -54,12 +54,12 @@ pub fn define_constraints() -> impl ConstraintSet<VehicleRoutePlan, HardSoftScor
         .penalize_hard_with(|v: &Vehicle| HardSoftScore::of_hard(v.excess_demand() as i64))
         .as_constraint("vehicleCapacity");
 
-    // HARD: Time windows - penalize late arrivals using shadow variable
+    // HARD: Time windows - penalize late arrivals using cached aggregate
     let time_window = factory
         .clone()
-        .for_each(|p: &VehicleRoutePlan| p.visits.as_slice())
-        .filter(|v: &Visit| v.is_late())
-        .penalize_hard_with(|v: &Visit| HardSoftScore::of_hard(v.late_minutes()))
+        .for_each(|p: &VehicleRoutePlan| p.vehicles.as_slice())
+        .filter(|v: &Vehicle| v.late_minutes() > 0)
+        .penalize_hard_with(|v: &Vehicle| HardSoftScore::of_hard(v.late_minutes()))
         .as_constraint("serviceFinishedAfterMaxEndTime");
 
     // SOFT: Minimize travel time
