@@ -15,7 +15,7 @@ use solverforge::{
     // Shadow variable support
     ShadowAwareScoreDirector,
     // SERIO incremental scoring
-    ScoreDirector, TypedScoreDirector,
+    TypedScoreDirector,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -314,6 +314,10 @@ fn solve_blocking(
     // Create solver scope
     let mut solver_scope = SolverScope::new(Box::new(director));
 
+    // Initialize the score director for SERIO incremental scoring.
+    // TypedScoreDirector requires calculate_score() before incremental updates work.
+    solver_scope.calculate_score();
+
     // Set up termination flag for stop signal
     let terminate_flag = Arc::new(AtomicBool::new(false));
     solver_scope.set_terminate_early_flag(terminate_flag.clone());
@@ -439,6 +443,7 @@ fn finish_job(job: &Arc<RwLock<SolveJob>>, solution: &VehicleRoutePlan, score: H
 mod tests {
     use super::*;
     use crate::demo_data::generate_philadelphia;
+    use solverforge::ScoreDirector;
 
     #[test]
     fn test_construction_heuristic() {
