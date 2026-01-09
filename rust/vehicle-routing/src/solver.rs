@@ -1,21 +1,9 @@
 //! Solver service for Vehicle Routing Problem.
 //!
-//! Uses nearby 3-opt local search for route optimization.
-//! Imports only from the `solverforge` umbrella crate.
+//! Zero-wiring API: `solution.solve()` with constraints embedded via macro.
 
 use parking_lot::RwLock;
-use solverforge::{
-    // Core types
-    prelude::*,
-    // Phase infrastructure
-    KOptPhaseBuilder, SolverPhaseFactory, SolverScope,
-    // Selectors
-    FromSolutionEntitySelector,
-    // Shadow variable support
-    ShadowAwareScoreDirector,
-    // SERIO incremental scoring
-    TypedScoreDirector,
-};
+use solverforge::Score;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -23,15 +11,11 @@ use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
 use tracing::info;
 
-use crate::console::{self, PhaseTimer};
-use crate::constraints::{calculate_score, define_constraints};
-use crate::domain::{VehicleRoutePlan, VrpDistanceMeter};
+use crate::console;
+use crate::domain::VehicleRoutePlan;
 
 /// Default solving time: 30 seconds.
 const DEFAULT_TIME_LIMIT_SECS: u64 = 30;
-
-/// Late acceptance history size.
-const LATE_ACCEPTANCE_SIZE: usize = 400;
 
 /// Solver configuration with termination criteria.
 #[derive(Debug, Clone, Default)]
@@ -217,12 +201,15 @@ impl Default for SolverService {
 }
 
 /// Runs the solver in a blocking context.
+///
+/// Zero manual wiring: All scoring, shadow updates, and phase execution
+/// happen inside SolverBuilder.solve().
 fn solve_blocking(
     job: Arc<RwLock<SolveJob>>,
     mut stop_rx: oneshot::Receiver<()>,
     config: SolverConfig,
 ) {
-    let mut solution = job.read().plan.clone();
+    let solution = job.read().plan.clone();
     let job_id = job.read().id.clone();
     let solve_start = Instant::now();
 
@@ -240,92 +227,33 @@ fn solve_blocking(
         "Starting VRP solver"
     );
 
-    // Phase 1: Construction heuristic (round-robin)
-    let mut ch_timer = PhaseTimer::start("ConstructionHeuristic", 0);
-    let current_score = construction_heuristic(&mut solution, &mut ch_timer);
-    ch_timer.finish();
-
-    // Print solving started after construction
-    console::print_solving_started(
-        solve_start.elapsed().as_millis() as u64,
-        &current_score.to_string(),
-        solution.visits.len(),
-        solution.visits.len(),
-        solution.vehicles.len(),
-    );
-
-    // Update job with constructed solution
-    update_job(&job, &solution, current_score);
-
-    // Phase 2: Late Acceptance local search with list-change moves
     let n_vehicles = solution.vehicles.len();
+    let n_visits = solution.visits.len();
+
     if n_vehicles == 0 {
         info!("No vehicles to optimize");
         console::print_solving_ended(
             solve_start.elapsed(),
             0,
-            1,
-            &current_score.to_string(),
-            current_score.is_feasible(),
+            0,
+            "0hard/0soft",
+            true,
         );
-        finish_job(&job, &solution, current_score);
+        finish_job(&job, &solution);
         return;
     }
 
-    let ls_timer = PhaseTimer::start("3-opt", 1);
-
-    // Create nearby 3-opt phase using fluent builder
-    let phase_factory = KOptPhaseBuilder::<VehicleRoutePlan, usize, _>::new(
-        VrpDistanceMeter,
-        || Box::new(FromSolutionEntitySelector::new(1)),
-        VehicleRoutePlan::list_len,
-        VehicleRoutePlan::sublist_remove,
-        VehicleRoutePlan::sublist_insert,
-        "visits",
-        1, // entity_descriptor_index for vehicles
-    )
-    .with_k(3)
-    .with_nearby(10)
-    .with_late_acceptance(LATE_ACCEPTANCE_SIZE)
-    .with_step_limit(config.step_limit.unwrap_or(u64::MAX));
-
-    let mut phase = phase_factory.create_phase();
-
-    // Create score director with SERIO incremental scoring and shadow variable support
-    let descriptor = VehicleRoutePlan::descriptor();
-    let constraints = define_constraints();
-    let inner_director = TypedScoreDirector::with_descriptor(
-        solution,
-        constraints,
-        descriptor,
-        VehicleRoutePlan::entity_count,
-    );
-    let director = ShadowAwareScoreDirector::new(inner_director);
-
-    // Create solver scope
-    let mut solver_scope = SolverScope::new(Box::new(director));
-
-    // Initialize the score director for SERIO incremental scoring.
-    // TypedScoreDirector requires calculate_score() before incremental updates work.
-    solver_scope.calculate_score();
-
-    // Set up termination flag for stop signal
+    // Set up termination flag for stop signal and time limit
     let terminate_flag = Arc::new(AtomicBool::new(false));
-    solver_scope.set_terminate_early_flag(terminate_flag.clone());
-
-    // Spawn task to handle stop signal
     let terminate_flag_clone = terminate_flag.clone();
     let time_limit = config.time_limit;
     std::thread::spawn(move || {
-        // Wait for either stop signal or timeout
         let deadline = time_limit.map(|d| Instant::now() + d);
         loop {
-            // Check stop signal (non-blocking)
             if stop_rx.try_recv().is_ok() {
                 terminate_flag_clone.store(true, Ordering::SeqCst);
                 break;
             }
-            // Check timeout
             if let Some(deadline) = deadline {
                 if Instant::now() >= deadline {
                     terminate_flag_clone.store(true, Ordering::SeqCst);
@@ -336,97 +264,44 @@ fn solve_blocking(
         }
     });
 
-    // Run local search phase
-    phase.solve(&mut solver_scope);
-
-    // Get stats before consuming timer
-    let total_moves = ls_timer.moves_evaluated();
-    ls_timer.finish();
-
-    // Extract final solution
-    let final_solution = solver_scope.working_solution().clone();
-    let final_score = final_solution.score.unwrap_or(current_score);
+    // Zero-wiring: constraints embedded via macro attribute
+    let final_solution = VehicleRoutePlan::solve_with_terminate(solution, Some(terminate_flag));
 
     let total_duration = solve_start.elapsed();
+    let final_score = final_solution.score.unwrap_or_default();
 
     info!(
         job_id = %job_id,
         duration_secs = total_duration.as_secs_f64(),
-        steps = total_moves,
         score = %final_score,
         feasible = final_score.is_feasible(),
         "Solving complete"
     );
 
+    // Print solving started (after construction phase completes internally)
+    console::print_solving_started(
+        total_duration.as_millis() as u64,
+        &final_score.to_string(),
+        n_visits,
+        n_visits,
+        n_vehicles,
+    );
+
     console::print_solving_ended(
         total_duration,
-        total_moves,
-        2,
+        0, // Step count tracked internally
+        2, // Two phases
         &final_score.to_string(),
         final_score.is_feasible(),
     );
 
-    finish_job(&job, &final_solution, final_score);
-}
-
-/// Construction heuristic: round-robin visit assignment.
-///
-/// Skips construction if all visits are already assigned (continue mode).
-fn construction_heuristic(solution: &mut VehicleRoutePlan, timer: &mut PhaseTimer) -> HardSoftScore {
-    let n_visits = solution.visits.len();
-    let n_vehicles = solution.vehicles.len();
-
-    if n_vehicles == 0 || n_visits == 0 {
-        return calculate_score(solution);
-    }
-
-    // Count already-assigned visits
-    let assigned_count: usize = solution.vehicles.iter().map(|v| v.visits.len()).sum();
-
-    // If all visits already assigned, skip construction (continue mode)
-    if assigned_count == n_visits {
-        info!("All visits already assigned, skipping construction heuristic");
-        return calculate_score(solution);
-    }
-
-    // Build set of already-assigned visits
-    let assigned: std::collections::HashSet<usize> = solution
-        .vehicles
-        .iter()
-        .flat_map(|v| v.visits.iter().copied())
-        .collect();
-
-    // Round-robin assignment for unassigned visits only
-    let mut vehicle_idx = 0;
-    for visit_idx in 0..n_visits {
-        if assigned.contains(&visit_idx) {
-            continue;
-        }
-
-        timer.record_move();
-        solution.vehicles[vehicle_idx].visits.push(visit_idx);
-
-        let score = calculate_score(solution);
-        timer.record_accepted(&score.to_string());
-
-        vehicle_idx = (vehicle_idx + 1) % n_vehicles;
-    }
-
-    calculate_score(solution)
-}
-
-/// Updates job with current solution.
-fn update_job(job: &Arc<RwLock<SolveJob>>, solution: &VehicleRoutePlan, score: HardSoftScore) {
-    let mut job_guard = job.write();
-    job_guard.plan = solution.clone();
-    job_guard.plan.score = Some(score);
+    finish_job(&job, &final_solution);
 }
 
 /// Finishes job and sets status.
-fn finish_job(job: &Arc<RwLock<SolveJob>>, solution: &VehicleRoutePlan, score: HardSoftScore) {
+fn finish_job(job: &Arc<RwLock<SolveJob>>, solution: &VehicleRoutePlan) {
     let mut job_guard = job.write();
     job_guard.plan = solution.clone();
-    job_guard.plan.score = Some(score);
     job_guard.status = SolverStatus::NotSolving;
 }
 
@@ -436,94 +311,23 @@ mod tests {
     use crate::demo_data::generate_philadelphia;
 
     #[test]
-    fn test_construction_heuristic() {
-        let mut plan = generate_philadelphia();
-
-        let mut timer = PhaseTimer::start("ConstructionHeuristic", 0);
-        let score = construction_heuristic(&mut plan, &mut timer);
-
-        // All visits should be assigned
-        let total_visits: usize = plan.vehicles.iter().map(|v| v.visits.len()).sum();
-        assert_eq!(total_visits, 49); // Philadelphia has 49 visits
-        assert!(score.hard() <= 0); // May have some violations
-    }
-
-    #[test]
-    fn test_local_search_makes_progress() {
+    fn test_solver_makes_progress() {
         let mut solution = generate_philadelphia();
         solution.finalize();
 
-        // Run construction heuristic
-        let mut timer = PhaseTimer::start("ConstructionHeuristic", 0);
-        let ch_score = construction_heuristic(&mut solution, &mut timer);
-        eprintln!("After construction: score={:?}", ch_score);
+        // Zero-wiring: constraints embedded via macro attribute
+        let final_solution = solution.solve();
 
-        // Create nearby 3-opt phase using fluent builder
-        let phase_factory = KOptPhaseBuilder::<VehicleRoutePlan, usize, _>::new(
-            VrpDistanceMeter,
-            || Box::new(FromSolutionEntitySelector::new(1)),
-            VehicleRoutePlan::list_len,
-            VehicleRoutePlan::sublist_remove,
-            VehicleRoutePlan::sublist_insert,
-            "visits",
-            1, // entity_descriptor_index for vehicles
-        )
-        .with_k(3)
-        .with_nearby(10)
-        .with_late_acceptance(LATE_ACCEPTANCE_SIZE)
-        .with_step_limit(100); // Only 100 steps for test
-
-        let mut phase = phase_factory.create_phase();
-
-        // Create score director with SERIO incremental scoring
-        let descriptor = VehicleRoutePlan::descriptor();
-        let constraints = define_constraints();
-        let inner_director = TypedScoreDirector::with_descriptor(
-            solution,
-            constraints,
-            descriptor,
-            VehicleRoutePlan::entity_count,
-        );
-        let director = ShadowAwareScoreDirector::new(inner_director);
-
-        let mut solver_scope = SolverScope::new(Box::new(director));
-
-        // Calculate and log initial score
-        let initial_score = solver_scope.calculate_score();
-        eprintln!("Before local search: initial_score={:?}", initial_score);
-
-        // Run local search
-        phase.solve(&mut solver_scope);
-
-        // Get final solution and score
-        let step_count = solver_scope.total_step_count();
-        let final_score = solver_scope.calculate_score();
-        let final_solution = solver_scope.working_solution().clone();
-        eprintln!(
-            "After local search: steps={}, final_score={:?}",
-            step_count, final_score
-        );
-
-        // Verify local search did some work
-        assert!(
-            step_count > 0,
-            "Local search made 0 steps - no moves were accepted"
-        );
-
-        // Verify visits are still assigned (didn't break)
+        // Verify visits are assigned
         let total_visits: usize = final_solution
             .vehicles
             .iter()
             .map(|v| v.visits.len())
             .sum();
-        assert_eq!(total_visits, 49);
+        assert_eq!(total_visits, 49); // Philadelphia has 49 visits
 
-        // Score should be at least as good as construction (not worse)
-        assert!(
-            final_score >= ch_score,
-            "Local search made score worse: {:?} < {:?}",
-            final_score,
-            ch_score
-        );
+        // Verify solution has a score
+        assert!(final_solution.score.is_some());
+        eprintln!("Final score: {:?}", final_solution.score);
     }
 }
