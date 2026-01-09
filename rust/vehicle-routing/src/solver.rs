@@ -277,12 +277,12 @@ fn solve_blocking(
     // Create nearby 3-opt phase using fluent builder
     let phase_factory = KOptPhaseBuilder::<VehicleRoutePlan, usize, _>::new(
         VrpDistanceMeter,
-        || Box::new(FromSolutionEntitySelector::new(1)),
+        || Box::new(FromSolutionEntitySelector::new(0)),
         VehicleRoutePlan::list_len,
         VehicleRoutePlan::sublist_remove,
         VehicleRoutePlan::sublist_insert,
         "visits",
-        1, // entity_descriptor_index for vehicles
+        0, // entity_descriptor_index for vehicles
     )
     .with_k(3)
     .with_nearby(10)
@@ -292,7 +292,7 @@ fn solve_blocking(
     let mut phase = phase_factory.create_phase();
 
     // Create score director with SERIO incremental scoring and shadow variable support
-    let descriptor = crate::domain::create_solution_descriptor();
+    let descriptor = VehicleRoutePlan::descriptor();
     let constraints = define_constraints();
     let inner_director = TypedScoreDirector::with_descriptor(
         solution,
@@ -461,12 +461,12 @@ mod tests {
         // Create nearby 3-opt phase using fluent builder
         let phase_factory = KOptPhaseBuilder::<VehicleRoutePlan, usize, _>::new(
             VrpDistanceMeter,
-            || Box::new(FromSolutionEntitySelector::new(1)),
+            || Box::new(FromSolutionEntitySelector::new(0)),
             VehicleRoutePlan::list_len,
             VehicleRoutePlan::sublist_remove,
             VehicleRoutePlan::sublist_insert,
             "visits",
-            1,
+            0,
         )
         .with_k(3)
         .with_nearby(10)
