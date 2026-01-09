@@ -1026,39 +1026,3 @@ impl ListPositionDistanceMeter<VehicleRoutePlan> for VrpDistanceMeter {
     }
 }
 
-// =============================================================================
-// Solution Descriptor
-// =============================================================================
-
-use solverforge::{EntityDescriptor, SolutionDescriptor, TypedEntityExtractor};
-use std::any::TypeId;
-
-/// Helper functions for typed entity extraction.
-fn get_vehicles(plan: &VehicleRoutePlan) -> &Vec<Vehicle> {
-    &plan.vehicles
-}
-
-fn get_vehicles_mut(plan: &mut VehicleRoutePlan) -> &mut Vec<Vehicle> {
-    &mut plan.vehicles
-}
-
-/// Creates a solution descriptor for `VehicleRoutePlan`.
-///
-/// Used by `SimpleScoreDirector` and `ShadowAwareScoreDirector`.
-///
-/// # Examples
-///
-/// ```
-/// use vehicle_routing::domain::create_solution_descriptor;
-///
-/// let descriptor = create_solution_descriptor();
-/// assert_eq!(descriptor.entity_descriptor_count(), 1);
-/// ```
-pub fn create_solution_descriptor() -> SolutionDescriptor {
-    let extractor = TypedEntityExtractor::new("Vehicle", "vehicles", get_vehicles, get_vehicles_mut);
-    let entity_desc = EntityDescriptor::new("Vehicle", TypeId::of::<Vehicle>(), "vehicles")
-        .with_extractor(Box::new(extractor));
-
-    SolutionDescriptor::new("VehicleRoutePlan", TypeId::of::<VehicleRoutePlan>())
-        .with_entity(entity_desc)
-}
