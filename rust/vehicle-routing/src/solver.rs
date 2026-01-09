@@ -306,7 +306,6 @@ fn finish_job(job: &Arc<RwLock<SolveJob>>, solution: &VehicleRoutePlan) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::demo_data::generate_philadelphia;
 
     #[test]
