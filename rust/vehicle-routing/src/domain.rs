@@ -482,7 +482,7 @@ pub struct VisitTiming {
 /// // Travel time matrix is now populated
 /// assert!(plan.travel_time(0, 1) > 0);
 /// ```
-#[planning_solution]
+#[planning_solution(constraints = "crate::constraints::define_constraints")]
 #[shadow_variable_updates(
     list_owner = "vehicles",
     list_field = "visits",
