@@ -1,0 +1,12 @@
+[termination]
+seconds_spent_limit = 30
+
+[construction]
+type = "list"
+
+[local_search]
+type = "k_opt"
+
+[local_search.acceptor]
+type = "late_acceptance"
+late_acceptance_size = 400
