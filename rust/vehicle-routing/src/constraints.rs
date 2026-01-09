@@ -1,4 +1,21 @@
 //! Constraint definitions for Vehicle Routing Problem.
+//!
+//! # Example
+//!
+//! ```
+//! use vehicle_routing::demo_data::generate_philadelphia;
+//!
+//! let mut plan = generate_philadelphia();
+//! plan.finalize();
+//! let result = plan.solve();
+//!
+//! // All visits assigned
+//! let total: usize = result.vehicles.iter().map(|v| v.visits.len()).sum();
+//! assert_eq!(total, 49);
+//!
+//! // Has a score
+//! assert!(result.score.is_some());
+//! ```
 
 use solverforge::prelude::*;
 use solverforge::stream::ConstraintFactory;

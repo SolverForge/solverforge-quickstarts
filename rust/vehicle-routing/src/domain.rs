@@ -199,7 +199,9 @@ impl Vehicle {
     element_collection = "visits",
     element_type = "usize",
     inverse_field = "vehicle_idx",
-    previous_field = "previous_visit_idx"
+    previous_field = "previous_visit_idx",
+    cascading_listener = "compute_arrival_time",
+    post_update_listener = "compute_vehicle_caches"
 )]
 #[derive(Serialize, Deserialize)]
 pub struct VehicleRoutePlan {
@@ -278,5 +280,50 @@ impl VehicleRoutePlan {
             .and_then(|row| row.get(to_idx))
             .copied()
             .unwrap_or(0)
+    }
+
+    /// Cascading shadow: compute arrival_time for a visit.
+    fn compute_arrival_time(&mut self, visit_idx: usize) {
+        let vehicle_idx = match self.visits[visit_idx].vehicle_idx {
+            Some(idx) => idx,
+            None => return,
+        };
+        let (prev_loc, prev_time) = match self.visits[visit_idx].previous_visit_idx {
+            Some(prev_idx) => {
+                let prev = &self.visits[prev_idx];
+                let arr = prev.arrival_time.unwrap_or(0);
+                let start = arr.max(prev.min_start_time);
+                (prev.location.index, start + prev.service_duration)
+            }
+            None => {
+                let v = &self.vehicles[vehicle_idx];
+                (v.home_location.index, v.departure_time)
+            }
+        };
+        let travel = self.travel_time(prev_loc, self.visits[visit_idx].location.index);
+        self.visits[visit_idx].arrival_time = Some(prev_time + travel);
+    }
+
+    /// Post-update: compute vehicle cached aggregates.
+    fn compute_vehicle_caches(&mut self, vehicle_idx: usize) {
+        let v = &self.vehicles[vehicle_idx];
+        let mut demand = 0i32;
+        let mut driving = 0i64;
+        let mut late = 0i64;
+        let mut prev_loc = v.home_location.index;
+
+        for &visit_idx in &v.visits {
+            let visit = &self.visits[visit_idx];
+            demand += visit.demand;
+            driving += self.travel_time(prev_loc, visit.location.index);
+            late += visit.late_minutes();
+            prev_loc = visit.location.index;
+        }
+        driving += self.travel_time(prev_loc, self.vehicles[vehicle_idx].home_location.index);
+
+        let v = &mut self.vehicles[vehicle_idx];
+        v.cached_total_demand = demand;
+        v.cached_driving_time = driving;
+        v.cached_late_minutes = late;
     }
 }
