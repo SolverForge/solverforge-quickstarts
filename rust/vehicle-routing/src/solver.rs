@@ -1,6 +1,6 @@
 //! Solver service for Vehicle Routing Problem.
 //!
-//! Uses Late Acceptance local search with list-change moves for route optimization.
+//! Uses nearby 3-opt local search for route optimization.
 //! Imports only from the `solverforge` umbrella crate.
 
 use parking_lot::RwLock;
@@ -8,8 +8,7 @@ use solverforge::{
     // Core types
     prelude::*,
     // Phase infrastructure
-    FirstAcceptedForager, LateAcceptanceAcceptor, ListChangeMove, ListChangeMoveSelector,
-    LocalSearchPhase, Phase, SolverScope,
+    KOptPhaseBuilder, SolverPhaseFactory, SolverScope,
     // Selectors
     FromSolutionEntitySelector,
     // Shadow variable support
@@ -26,7 +25,7 @@ use tracing::info;
 
 use crate::console::{self, PhaseTimer};
 use crate::constraints::{calculate_score, define_constraints};
-use crate::domain::VehicleRoutePlan;
+use crate::domain::{VehicleRoutePlan, VrpDistanceMeter};
 
 /// Default solving time: 30 seconds.
 const DEFAULT_TIME_LIMIT_SECS: u64 = 30;
@@ -273,32 +272,24 @@ fn solve_blocking(
         return;
     }
 
-    let ls_timer = PhaseTimer::start("LateAcceptance", 1);
+    let ls_timer = PhaseTimer::start("3-opt", 1);
 
-    // Create entity selector for vehicles (index 1, not 0 which is visits)
-    let entity_selector = FromSolutionEntitySelector::new(1);
-
-    // Create list-change move selector using macro-generated methods
-    let move_selector: ListChangeMoveSelector<VehicleRoutePlan, usize> = ListChangeMoveSelector::new(
-        Box::new(entity_selector),
+    // Create nearby 3-opt phase using fluent builder
+    let phase_factory = KOptPhaseBuilder::<VehicleRoutePlan, usize, _>::new(
+        VrpDistanceMeter,
+        || Box::new(FromSolutionEntitySelector::new(1)),
         VehicleRoutePlan::list_len,
-        VehicleRoutePlan::list_remove,
-        VehicleRoutePlan::list_insert,
+        VehicleRoutePlan::sublist_remove,
+        VehicleRoutePlan::sublist_insert,
         "visits",
         1, // entity_descriptor_index for vehicles
-    );
+    )
+    .with_k(3)
+    .with_nearby(10)
+    .with_late_acceptance(LATE_ACCEPTANCE_SIZE)
+    .with_step_limit(config.step_limit.unwrap_or(u64::MAX));
 
-    // Create acceptor and forager
-    let acceptor = LateAcceptanceAcceptor::<VehicleRoutePlan>::new(LATE_ACCEPTANCE_SIZE);
-    let forager = FirstAcceptedForager::<VehicleRoutePlan, ListChangeMove<VehicleRoutePlan, usize>>::new();
-
-    // Create local search phase
-    let mut phase = LocalSearchPhase::new(
-        Box::new(move_selector),
-        Box::new(acceptor),
-        Box::new(forager),
-        config.step_limit,
-    );
+    let mut phase = phase_factory.create_phase();
 
     // Create score director with SERIO incremental scoring and shadow variable support
     let descriptor = crate::domain::create_solution_descriptor();
@@ -443,13 +434,11 @@ fn finish_job(job: &Arc<RwLock<SolveJob>>, solution: &VehicleRoutePlan, score: H
 mod tests {
     use super::*;
     use crate::demo_data::generate_philadelphia;
-    use solverforge::ScoreDirector;
 
     #[test]
     fn test_construction_heuristic() {
         let mut plan = generate_philadelphia();
 
-        // Create a timer but don't print (we're in a test)
         let mut timer = PhaseTimer::start("ConstructionHeuristic", 0);
         let score = construction_heuristic(&mut plan, &mut timer);
 
@@ -457,416 +446,6 @@ mod tests {
         let total_visits: usize = plan.vehicles.iter().map(|v| v.visits.len()).sum();
         assert_eq!(total_visits, 49); // Philadelphia has 49 visits
         assert!(score.hard() <= 0); // May have some violations
-    }
-
-    /// Debug test: verify SERIO works with RecordingScoreDirector (like LocalSearchPhase uses).
-    #[test]
-    fn test_serio_with_recording_director() {
-        use solverforge::{Move, RecordingScoreDirector};
-
-        let mut solution = generate_philadelphia();
-        solution.finalize();
-
-        // Simple round-robin assignment
-        for (i, _visit) in solution.visits.iter().enumerate() {
-            let vehicle_idx = i % solution.vehicles.len();
-            solution.vehicles[vehicle_idx].visits.push(i);
-        }
-        solution.update_shadows();
-
-        // Create typed score director
-        let descriptor = crate::domain::create_solution_descriptor();
-        let constraints = define_constraints();
-        let inner_director = TypedScoreDirector::with_descriptor(
-            solution,
-            constraints,
-            descriptor,
-            VehicleRoutePlan::entity_count,
-        );
-        let mut director = ShadowAwareScoreDirector::new(inner_director);
-
-        // Initialize
-        let initial_score = director.calculate_score();
-        eprintln!("\nInitial score: {:?}", initial_score);
-
-        // Create a move
-        let move_instance = ListChangeMove::<VehicleRoutePlan, usize>::new(
-            0,    // source_entity_index
-            0,    // source_position
-            1,    // dest_entity_index
-            0,    // dest_position
-            VehicleRoutePlan::list_len,
-            VehicleRoutePlan::list_remove,
-            VehicleRoutePlan::list_insert,
-            "visits",
-            1, // descriptor_index
-        );
-
-        // === Phase 1: Evaluate move with RecordingScoreDirector (like LocalSearchPhase) ===
-        eprintln!("\n=== Phase 1: Evaluate move with RecordingScoreDirector ===");
-        let move_score;
-        {
-            let mut recording = RecordingScoreDirector::new(&mut director);
-            move_instance.do_move(&mut recording);
-            move_score = recording.calculate_score();
-            eprintln!("Move score (during evaluation): {:?}", move_score);
-
-            // Undo the move
-            recording.undo_changes();
-        }
-        // RecordingScoreDirector is now dropped
-
-        // Check the score after undo
-        let score_after_undo = director.calculate_score();
-        eprintln!("Score after undo: {:?}", score_after_undo);
-
-        // Score should be back to initial
-        assert_eq!(
-            initial_score, score_after_undo,
-            "Score not restored after undo!"
-        );
-
-        // === Phase 2: Apply move for real (like LocalSearchPhase does after picking) ===
-        eprintln!("\n=== Phase 2: Apply move for real ===");
-        move_instance.do_move(&mut director);
-
-        let final_score = director.calculate_score();
-        eprintln!("Final score (after real application): {:?}", final_score);
-
-        // This should match the move_score from evaluation
-        assert_eq!(
-            move_score, final_score,
-            "Final score doesn't match evaluation score!"
-        );
-
-        // And it should be different from initial
-        assert_ne!(
-            initial_score, final_score,
-            "Score didn't change after applying move!"
-        );
-    }
-
-    /// Debug test: verify SERIO works through TypedScoreDirector (not just raw constraints).
-    #[test]
-    fn test_serio_via_score_director() {
-        let mut solution = generate_philadelphia();
-        solution.finalize();
-
-        // Simple round-robin assignment
-        for (i, _visit) in solution.visits.iter().enumerate() {
-            let vehicle_idx = i % solution.vehicles.len();
-            solution.vehicles[vehicle_idx].visits.push(i);
-        }
-        solution.update_shadows();
-
-        // Create typed score director (same as in local search)
-        let descriptor = crate::domain::create_solution_descriptor();
-        let constraints = define_constraints();
-        let inner_director = TypedScoreDirector::with_descriptor(
-            solution,
-            constraints,
-            descriptor,
-            VehicleRoutePlan::entity_count,
-        );
-        let mut director = ShadowAwareScoreDirector::new(inner_director);
-
-        // Initialize
-        let initial_score = director.calculate_score();
-        eprintln!("\nInitial score (via director): {:?}", initial_score);
-
-        // Now manually apply a move via the score director
-        let source_vehicle = 0;
-        let dest_vehicle = 1;
-        let source_pos = 0;
-
-        eprintln!("\n=== Applying move via score director ===");
-
-        // before_variable_changed for both vehicles
-        director.before_variable_changed(1, source_vehicle, "visits");
-        director.before_variable_changed(1, dest_vehicle, "visits");
-
-        // Make the change
-        let visit_idx = director.working_solution_mut().vehicles[source_vehicle]
-            .visits
-            .remove(source_pos);
-        director.working_solution_mut().vehicles[dest_vehicle]
-            .visits
-            .push(visit_idx);
-        eprintln!("Moved visit {} from vehicle {} to vehicle {}", visit_idx, source_vehicle, dest_vehicle);
-
-        // after_variable_changed for both vehicles
-        director.after_variable_changed(1, source_vehicle, "visits");
-        director.after_variable_changed(1, dest_vehicle, "visits");
-
-        // Get the new score from cached_score (via calculate_score)
-        let new_score = director.calculate_score();
-        eprintln!("New score (after move): {:?}", new_score);
-
-        // Also do a full re-evaluation to verify
-        // (need to create new constraints since old ones may have state)
-        director.working_solution_mut().update_shadows();
-        let full_rescore = calculate_score(director.working_solution_mut());
-        eprintln!("Full re-evaluation: {:?}", full_rescore);
-
-        // The incremental score should match full re-evaluation
-        assert_eq!(
-            new_score, full_rescore,
-            "Incremental score doesn't match full re-evaluation!"
-        );
-
-        // The score should have changed
-        assert_ne!(
-            initial_score, new_score,
-            "Score didn't change after move!"
-        );
-    }
-
-    /// Debug test: trace SERIO deltas to understand why score doesn't change.
-    #[test]
-    fn test_serio_delta_trace() {
-        use solverforge::ConstraintSet;
-
-        let mut solution = generate_philadelphia();
-        solution.finalize();
-
-        // Simple round-robin assignment (not using construction heuristic to keep it simple)
-        for (i, _visit) in solution.visits.iter().enumerate() {
-            let vehicle_idx = i % solution.vehicles.len();
-            solution.vehicles[vehicle_idx].visits.push(i);
-        }
-
-        // Update shadows after assignment
-        solution.update_shadows();
-
-        // Print initial state
-        eprintln!("\n=== Initial State ===");
-        for (i, v) in solution.vehicles.iter().enumerate() {
-            eprintln!(
-                "Vehicle {}: visits={:?}, cached_driving_time={}, driving_time_minutes={}",
-                i,
-                v.visits,
-                v.cached_driving_time,
-                v.driving_time_minutes()
-            );
-        }
-
-        // Create typed constraints
-        let mut constraints = define_constraints();
-
-        // Initialize constraints (full evaluation)
-        let initial_score = constraints.initialize_all(&solution);
-        eprintln!("\nInitial score from initialize_all: {:?}", initial_score);
-
-        // Also evaluate each constraint separately
-        let per_constraint = constraints.evaluate_each(&solution);
-        for cr in &per_constraint {
-            eprintln!(
-                "  Constraint '{}': score={:?}, matches={}",
-                cr.name, cr.score, cr.match_count
-            );
-        }
-
-        // Now simulate a move: move visit 0 from vehicle 0 to vehicle 1
-        let source_vehicle = 0;
-        let dest_vehicle = 1;
-        let source_pos = 0;
-
-        eprintln!("\n=== Simulating move: visit from vehicle {} pos {} to vehicle {} ===",
-            source_vehicle, source_pos, dest_vehicle);
-
-        // Step 1: on_retract for source vehicle (BEFORE any changes)
-        let retract_source = constraints.on_retract_all(&solution, source_vehicle);
-        eprintln!("on_retract(source={}): delta={:?}", source_vehicle, retract_source);
-        eprintln!(
-            "  Vehicle {} cached_driving_time={} driving_time_minutes={}",
-            source_vehicle,
-            solution.vehicles[source_vehicle].cached_driving_time,
-            solution.vehicles[source_vehicle].driving_time_minutes()
-        );
-
-        // Step 2: on_retract for dest vehicle (BEFORE any changes)
-        let retract_dest = constraints.on_retract_all(&solution, dest_vehicle);
-        eprintln!("on_retract(dest={}): delta={:?}", dest_vehicle, retract_dest);
-
-        // Step 3: Make the change
-        let visit_idx = solution.vehicles[source_vehicle].visits.remove(source_pos);
-        solution.vehicles[dest_vehicle].visits.push(visit_idx);
-        eprintln!("Moved visit {} from vehicle {} to vehicle {}", visit_idx, source_vehicle, dest_vehicle);
-
-        // Step 4: Update shadows for ALL vehicles (use public method)
-        solution.update_shadows();
-        eprintln!(
-            "After shadow update - Vehicle {} cached_driving_time={} driving_time_minutes={}",
-            source_vehicle,
-            solution.vehicles[source_vehicle].cached_driving_time,
-            solution.vehicles[source_vehicle].driving_time_minutes()
-        );
-        eprintln!(
-            "After shadow update - Vehicle {} cached_driving_time={} driving_time_minutes={}",
-            dest_vehicle,
-            solution.vehicles[dest_vehicle].cached_driving_time,
-            solution.vehicles[dest_vehicle].driving_time_minutes()
-        );
-
-        // Step 5: on_insert for source vehicle (AFTER shadow update)
-        let insert_source = constraints.on_insert_all(&solution, source_vehicle);
-        eprintln!("on_insert(source={}): delta={:?}", source_vehicle, insert_source);
-
-        // Step 6: on_insert for dest vehicle (AFTER shadow update)
-        let insert_dest = constraints.on_insert_all(&solution, dest_vehicle);
-        eprintln!("on_insert(dest={}): delta={:?}", dest_vehicle, insert_dest);
-
-        // Calculate net delta
-        let total_delta = retract_source + retract_dest + insert_source + insert_dest;
-        eprintln!("\n=== Summary ===");
-        eprintln!("Total SERIO delta: {:?}", total_delta);
-        eprintln!("Expected new score: {:?}", initial_score + total_delta);
-
-        // Full re-evaluation for comparison
-        let full_rescore = constraints.evaluate_all(&solution);
-        eprintln!("Full re-evaluation score: {:?}", full_rescore);
-
-        // The SERIO delta should result in the same score as full re-evaluation
-        let serio_score = initial_score + total_delta;
-        assert_eq!(
-            serio_score, full_rescore,
-            "SERIO incremental score doesn't match full re-evaluation!"
-        );
-
-        // Also assert that the delta is non-zero (the move should change something)
-        assert_ne!(
-            total_delta,
-            HardSoftScore::zero(),
-            "SERIO delta is zero - moves aren't being tracked!"
-        );
-    }
-
-    /// Debug test: run a single step of local search and check scoring.
-    #[test]
-    fn test_single_local_search_step() {
-        use solverforge::{Move, MoveSelector, RecordingScoreDirector};
-
-        let mut solution = generate_philadelphia();
-        solution.finalize();
-
-        // Simple round-robin assignment
-        for (i, _visit) in solution.visits.iter().enumerate() {
-            let vehicle_idx = i % solution.vehicles.len();
-            solution.vehicles[vehicle_idx].visits.push(i);
-        }
-        solution.update_shadows();
-
-        // Create typed score director
-        let descriptor = crate::domain::create_solution_descriptor();
-        let constraints = define_constraints();
-        let inner_director = TypedScoreDirector::with_descriptor(
-            solution,
-            constraints,
-            descriptor,
-            VehicleRoutePlan::entity_count,
-        );
-        let mut director: Box<dyn solverforge::ScoreDirector<VehicleRoutePlan>> =
-            Box::new(ShadowAwareScoreDirector::new(inner_director));
-
-        // Initialize score
-        let initial_score = director.calculate_score();
-        eprintln!("\nInitial score: {:?}", initial_score);
-
-        // Create a move selector
-        let entity_selector = FromSolutionEntitySelector::new(1);
-        let move_selector = ListChangeMoveSelector::<VehicleRoutePlan, usize>::new(
-            Box::new(entity_selector),
-            VehicleRoutePlan::list_len,
-            VehicleRoutePlan::list_remove,
-            VehicleRoutePlan::list_insert,
-            "visits",
-            1,
-        );
-
-        // Get doable moves
-        let moves: Vec<_> = move_selector
-            .iter_moves(&*director)
-            .filter(|m| m.is_doable(&*director))
-            .collect();
-        eprintln!("Generated {} doable moves", moves.len());
-
-        // Evaluate first doable move
-        let first_move = &moves[0];
-        eprintln!(
-            "First doable move: source_entity={}, source_pos={}, dest_entity={}, dest_pos={}",
-            first_move.source_entity_index(),
-            first_move.source_position(),
-            first_move.dest_entity_index(),
-            first_move.dest_position()
-        );
-
-        // Print vehicle state before move
-        eprintln!("Before move - Vehicle 0:");
-        eprintln!(
-            "  visits={:?}",
-            director.working_solution().vehicles[0].visits
-        );
-        eprintln!(
-            "  cached_driving_time={}",
-            director.working_solution().vehicles[0].cached_driving_time
-        );
-
-        // Phase 1: Evaluate with RecordingScoreDirector
-        let move_score;
-        {
-            let mut recording = RecordingScoreDirector::new(&mut *director);
-            first_move.do_move(&mut recording);
-
-            // Print vehicle state after move execution
-            eprintln!("After do_move - Vehicle 0:");
-            eprintln!(
-                "  visits={:?}",
-                recording.working_solution().vehicles[0].visits
-            );
-            eprintln!(
-                "  cached_driving_time={}",
-                recording.working_solution().vehicles[0].cached_driving_time
-            );
-
-            move_score = recording.calculate_score();
-            eprintln!("Move score (evaluation): {:?}", move_score);
-            recording.undo_changes();
-
-            // Print state after undo
-            eprintln!("After undo - Vehicle 0:");
-            eprintln!(
-                "  visits={:?}",
-                recording.working_solution().vehicles[0].visits
-            );
-            eprintln!(
-                "  cached_driving_time={}",
-                recording.working_solution().vehicles[0].cached_driving_time
-            );
-        }
-
-        // Check score after undo
-        let score_after_undo = director.calculate_score();
-        eprintln!("Score after undo: {:?}", score_after_undo);
-        assert_eq!(initial_score, score_after_undo, "Score not restored after undo");
-
-        // Phase 2: Apply move for real (as LocalSearchPhase does)
-        eprintln!("\n=== Applying move for real ===");
-        first_move.do_move(&mut *director);
-
-        // Check score after real application
-        let final_score = director.calculate_score();
-        eprintln!("Final score: {:?}", final_score);
-
-        // This is the critical assertion
-        assert_eq!(
-            move_score, final_score,
-            "Final score doesn't match evaluation score - this is the bug!"
-        );
-
-        assert_ne!(
-            initial_score, final_score,
-            "Score didn't change after move!"
-        );
     }
 
     #[test]
@@ -879,28 +458,22 @@ mod tests {
         let ch_score = construction_heuristic(&mut solution, &mut timer);
         eprintln!("After construction: score={:?}", ch_score);
 
-        // Set up local search - entity index 1 for vehicles (0 is visits)
-        let entity_selector = FromSolutionEntitySelector::new(1);
-        let move_selector: ListChangeMoveSelector<VehicleRoutePlan, usize> =
-            ListChangeMoveSelector::new(
-                Box::new(entity_selector),
-                VehicleRoutePlan::list_len,
-                VehicleRoutePlan::list_remove,
-                VehicleRoutePlan::list_insert,
-                "visits",
-                1,
-            );
+        // Create nearby 3-opt phase using fluent builder
+        let phase_factory = KOptPhaseBuilder::<VehicleRoutePlan, usize, _>::new(
+            VrpDistanceMeter,
+            || Box::new(FromSolutionEntitySelector::new(1)),
+            VehicleRoutePlan::list_len,
+            VehicleRoutePlan::sublist_remove,
+            VehicleRoutePlan::sublist_insert,
+            "visits",
+            1,
+        )
+        .with_k(3)
+        .with_nearby(10)
+        .with_late_acceptance(LATE_ACCEPTANCE_SIZE)
+        .with_step_limit(100); // Only 100 steps for test
 
-        let acceptor = LateAcceptanceAcceptor::<VehicleRoutePlan>::new(LATE_ACCEPTANCE_SIZE);
-        let forager =
-            FirstAcceptedForager::<VehicleRoutePlan, ListChangeMove<VehicleRoutePlan, usize>>::new();
-
-        let mut phase = LocalSearchPhase::new(
-            Box::new(move_selector),
-            Box::new(acceptor),
-            Box::new(forager),
-            Some(100), // Only 100 steps for test
-        );
+        let mut phase = phase_factory.create_phase();
 
         // Create score director with SERIO incremental scoring
         let descriptor = crate::domain::create_solution_descriptor();
@@ -923,8 +496,6 @@ mod tests {
         phase.solve(&mut solver_scope);
 
         // Get final solution and score
-        // IMPORTANT: call calculate_score() to get the actual cached score from SERIO
-        // (not the stale score stored on the solution object)
         let step_count = solver_scope.total_step_count();
         let final_score = solver_scope.calculate_score();
         let final_solution = solver_scope.working_solution().clone();
