@@ -84,13 +84,14 @@ fn solve_blocking(job: Arc<RwLock<SolveJob>>, mut stop_rx: oneshot::Receiver<()>
 
     info!(job_id = %job_id, "Starting solver");
 
+    // External cancellation signal (user stops solving)
+    // Time limit comes from solver.toml, not hardcoded here
     let terminate = Arc::new(AtomicBool::new(false));
     let terminate_clone = terminate.clone();
 
     std::thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
-            if stop_rx.try_recv().is_ok() || Instant::now() >= deadline {
+            if stop_rx.try_recv().is_ok() {
                 terminate_clone.store(true, Ordering::SeqCst);
                 break;
             }
@@ -98,7 +99,7 @@ fn solve_blocking(job: Arc<RwLock<SolveJob>>, mut stop_rx: oneshot::Receiver<()>
         }
     });
 
-    let result = VehicleRoutePlan::solve_with_terminate(solution, Some(terminate));
+    let result = solution.solve_with_terminate(Some(terminate));
 
     info!(job_id = %job_id, duration = ?start.elapsed(), score = ?result.score, "Solving complete");
 
