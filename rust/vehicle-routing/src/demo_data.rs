@@ -307,22 +307,23 @@ fn generate_demo_data(
         location_idx += 1;
     }
 
-    // Create vehicles
+    // Create vehicles - now needs Location object, not index
+    let depot_count = config.vehicle_count.min(depots.len());
     let vehicles: Vec<_> = (0..config.vehicle_count)
         .map(|i| {
             let capacity = rng.gen_range(config.min_capacity..=config.max_capacity);
+            let home_loc = locations[i].clone();  // Depot locations are first
             Vehicle::new(
                 i,
                 VEHICLE_NAMES[i % VEHICLE_NAMES.len()],
                 capacity,
-                i, // depot location index
+                home_loc,
             )
             .with_departure_time(config.vehicle_start_time)
         })
         .collect();
 
-    // Create visits
-    let depot_count = config.vehicle_count.min(depots.len());
+    // Create visits - now needs Location object, not index
     let visits: Vec<_> = shuffled_visits
         .iter()
         .take(config.visit_count)
@@ -336,7 +337,8 @@ fn generate_demo_data(
             let demand = rng.gen_range(min_demand..=max_demand);
             let service_duration = rng.gen_range(min_service..=max_service);
 
-            Visit::new(i, loc_data.name, depot_count + i)
+            let visit_loc = locations[depot_count + i].clone();  // Visit locations are after depots
+            Visit::new(i, loc_data.name, visit_loc)
                 .with_demand(demand)
                 .with_time_window(min_time, max_time)
                 .with_service_duration(service_duration)
