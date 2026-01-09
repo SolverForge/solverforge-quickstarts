@@ -202,8 +202,7 @@ impl Default for SolverService {
 
 /// Runs the solver in a blocking context.
 ///
-/// Zero manual wiring: All scoring, shadow updates, and phase execution
-/// happen inside SolverBuilder.solve().
+/// Zero-wiring: constraints embedded via macro attribute on domain type.
 fn solve_blocking(
     job: Arc<RwLock<SolveJob>>,
     mut stop_rx: oneshot::Receiver<()>,
