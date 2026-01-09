@@ -1,0 +1,55 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: solverforge-legacy-apps
+  namespace: argocd
+spec:
+  generators:
+    - list:
+        elements:
+          - appName: employee-scheduling-fast
+            chartPath: legacy/employee-scheduling-fast/helm/employee-scheduling-fast
+          - appName: maintenance-scheduling-fast
+            chartPath: legacy/maintenance-scheduling-fast/helm/maintenance-scheduling-fast
+          - appName: meeting-scheduling-fast
+            chartPath: legacy/meeting-scheduling-fast/helm/meeting-scheduling-fast
+          - appName: order-picking-fast
+            chartPath: legacy/order-picking-fast/helm/order-picking-fast
+          - appName: vehicle-routing-fast
+            chartPath: legacy/vehicle-routing-fast/helm/vehicle-routing-fast
+          - appName: vm-placement-fast
+            chartPath: legacy/vm-placement-fast/helm/vm-placement-fast
+  template:
+    metadata:
+      name: '{{appName}}'
+      namespace: argocd
+      labels:
+        app.kubernetes.io/part-of: solverforge-legacy
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/SolverForge/solverforge-quickstarts.git
+        targetRevision: HEAD
+        path: '{{chartPath}}'
+        helm:
+          releaseName: '{{appName}}'
+          valueFiles:
+            - values.yaml
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: solverforge-benchmark
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - PruneLast=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m
