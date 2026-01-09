@@ -177,12 +177,13 @@ checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
 name = "employee-scheduling"
-version = "0.4.12"
+version = "0.4.1"
 dependencies = [
  "axum",
  "chrono",
  "parking_lot",
  "rand 0.8.5",
+ "rayon",
  "serde",
  "serde_json",
  "solverforge",
@@ -510,7 +511,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

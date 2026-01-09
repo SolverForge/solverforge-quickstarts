@@ -7,20 +7,23 @@ use axum::{
     Json, Router,
 };
 use chrono::{NaiveDate, NaiveDateTime};
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use uuid::Uuid;
 
 use crate::demo_data::{self, DemoData};
 use crate::domain::{Employee, EmployeeSchedule, Shift};
-use crate::solver::{solver_manager, SolverStatus};
+
+/// Job tracking for active solves.
+struct SolveJob {
+    solution: EmployeeSchedule,
+}
 
 /// Application state shared across handlers.
-///
-/// Stores active jobs and their latest solutions.
 pub struct AppState {
-    /// Maps job_id string -> (slot_index, latest_solution)
-    jobs: RwLock<HashMap<String, (usize, Option<EmployeeSchedule>)>>,
+    jobs: RwLock<HashMap<String, SolveJob>>,
 }
 
 impl AppState {
@@ -71,8 +74,10 @@ impl EmployeeDto {
     fn to_employee(&self, index: usize) -> Employee {
         let unavailable_dates: HashSet<NaiveDate> =
             self.unavailable_dates.iter().cloned().collect();
-        let undesired_dates: HashSet<NaiveDate> = self.undesired_dates.iter().cloned().collect();
-        let desired_dates: HashSet<NaiveDate> = self.desired_dates.iter().cloned().collect();
+        let undesired_dates: HashSet<NaiveDate> =
+            self.undesired_dates.iter().cloned().collect();
+        let desired_dates: HashSet<NaiveDate> =
+            self.desired_dates.iter().cloned().collect();
 
         let mut unavailable_days: Vec<NaiveDate> = unavailable_dates.iter().copied().collect();
         unavailable_days.sort();
@@ -115,12 +120,10 @@ pub struct ScheduleDto {
     pub shifts: Vec<ShiftDto>,
     #[serde(default)]
     pub score: Option<String>,
-    #[serde(default)]
-    pub solver_status: Option<SolverStatus>,
 }
 
 impl ScheduleDto {
-    pub fn from_schedule(schedule: &EmployeeSchedule, status: Option<SolverStatus>) -> Self {
+    pub fn from_schedule(schedule: &EmployeeSchedule) -> Self {
         let employees: Vec<EmployeeDto> = schedule.employees.iter().map(EmployeeDto::from).collect();
 
         let shifts: Vec<ShiftDto> = schedule
@@ -132,8 +135,7 @@ impl ScheduleDto {
                 end: s.end,
                 location: s.location.clone(),
                 required_skill: s.required_skill.clone(),
-                employee: s
-                    .employee_idx
+                employee: s.employee_idx
                     .and_then(|idx| schedule.employees.get(idx))
                     .map(EmployeeDto::from),
             })
@@ -143,7 +145,6 @@ impl ScheduleDto {
             employees,
             shifts,
             score: schedule.score.map(|s| format!("{}", s)),
-            solver_status: status,
         }
     }
 
@@ -169,10 +170,7 @@ impl ScheduleDto {
                 end: s.end,
                 location: s.location.clone(),
                 required_skill: s.required_skill.clone(),
-                employee_idx: s
-                    .employee
-                    .as_ref()
-                    .and_then(|e| name_to_idx.get(e.name.as_str()).copied()),
+                employee_idx: s.employee.as_ref().and_then(|e| name_to_idx.get(e.name.as_str()).copied()),
             })
             .collect();
 
@@ -244,7 +242,7 @@ async fn get_demo_data(Path(id): Path<String>) -> Result<Json<ScheduleDto>, Stat
     match id.parse::<DemoData>() {
         Ok(demo) => {
             let schedule = demo_data::generate(demo);
-            Ok(Json(ScheduleDto::from_schedule(&schedule, None)))
+            Ok(Json(ScheduleDto::from_schedule(&schedule)))
         }
         Err(_) => Err(StatusCode::NOT_FOUND),
     }
@@ -256,28 +254,35 @@ async fn create_schedule(
     State(state): State<Arc<AppState>>,
     Json(dto): Json<ScheduleDto>,
 ) -> String {
-    let id = uuid::Uuid::new_v4().to_string();
+    let id = Uuid::new_v4().to_string();
     let schedule = dto.to_domain();
 
-    // Start solving and get receiver
-    let (slot_idx, mut receiver) = solver_manager().solve(schedule);
-
-    // Store job mapping
+    // Store initial state
     {
-        let mut jobs = state.jobs.write().unwrap();
-        jobs.insert(id.clone(), (slot_idx, None));
+        let mut jobs = state.jobs.write();
+        jobs.insert(id.clone(), SolveJob {
+            solution: schedule.clone(),
+        });
     }
 
-    // Spawn task to receive solutions and update state
+    // Start solving in background via library API
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let job_id = id.clone();
     let state_clone = state.clone();
-    let id_clone = id.clone();
+
     tokio::spawn(async move {
-        while let Some((solution, _score)) = receiver.recv().await {
-            let mut jobs = state_clone.jobs.write().unwrap();
-            if let Some((_, stored_solution)) = jobs.get_mut(&id_clone) {
-                *stored_solution = Some(solution);
+        while let Some((solution, _score)) = rx.recv().await {
+            let mut jobs = state_clone.jobs.write();
+            if let Some(job) = jobs.get_mut(&job_id) {
+                job.solution = solution;
             }
         }
+    });
+
+    // Solvable trait auto-implemented by #[planning_solution] macro
+    use solverforge::Solvable;
+    rayon::spawn(move || {
+        schedule.solve(None, tx);
     });
 
     id
@@ -285,8 +290,7 @@ async fn create_schedule(
 
 /// GET /schedules - List all schedule IDs.
 async fn list_schedules(State(state): State<Arc<AppState>>) -> Json<Vec<String>> {
-    let jobs = state.jobs.read().unwrap();
-    Json(jobs.keys().cloned().collect())
+    Json(state.jobs.read().keys().cloned().collect())
 }
 
 /// GET /schedules/{id} - Get a schedule's current state.
@@ -294,13 +298,10 @@ async fn get_schedule(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<ScheduleDto>, StatusCode> {
-    let jobs = state.jobs.read().unwrap();
-    match jobs.get(&id) {
-        Some((slot_idx, Some(schedule))) => {
-            let status = solver_manager().get_status(*slot_idx);
-            Ok(Json(ScheduleDto::from_schedule(schedule, Some(status))))
+    match state.jobs.read().get(&id) {
+        Some(job) => {
+            Ok(Json(ScheduleDto::from_schedule(&job.solution)))
         }
-        Some((_, None)) => Err(StatusCode::NO_CONTENT), // Solving started but no solution yet
         None => Err(StatusCode::NOT_FOUND),
     }
 }
@@ -310,7 +311,6 @@ async fn get_schedule(
 #[serde(rename_all = "camelCase")]
 pub struct StatusResponse {
     pub score: Option<String>,
-    pub solver_status: SolverStatus,
 }
 
 /// GET /schedules/{id}/status - Get a schedule's status.
@@ -318,12 +318,12 @@ async fn get_schedule_status(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<StatusResponse>, StatusCode> {
-    let jobs = state.jobs.read().unwrap();
-    match jobs.get(&id) {
-        Some((slot_idx, schedule)) => Ok(Json(StatusResponse {
-            score: schedule.as_ref().and_then(|s| s.score.map(|sc| format!("{}", sc))),
-            solver_status: solver_manager().get_status(*slot_idx),
-        })),
+    match state.jobs.read().get(&id) {
+        Some(job) => {
+            Ok(Json(StatusResponse {
+                score: job.solution.score.map(|s| format!("{}", s)),
+            }))
+        }
         None => Err(StatusCode::NOT_FOUND),
     }
 }
@@ -333,21 +333,10 @@ async fn stop_solving(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> StatusCode {
-    let slot_idx = {
-        let jobs = state.jobs.read().unwrap();
-        jobs.get(&id).map(|(idx, _)| *idx)
-    };
-
-    match slot_idx {
-        Some(idx) => {
-            solver_manager().terminate_early(idx);
-            solver_manager().free_slot(idx);
-
-            let mut jobs = state.jobs.write().unwrap();
-            jobs.remove(&id);
-            StatusCode::NO_CONTENT
-        }
-        None => StatusCode::NOT_FOUND,
+    if state.jobs.write().remove(&id).is_some() {
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::NOT_FOUND
     }
 }
 
@@ -381,29 +370,46 @@ pub struct AnalyzeResponse {
 
 /// PUT /schedules/analyze - Analyze constraints for a schedule.
 ///
-/// Uses the SolutionManager.analyze() API.
-async fn analyze_schedule(Json(dto): Json<ScheduleDto>) -> Json<AnalyzeResponse> {
-    use crate::solver::solution_manager;
+/// Uses TypedScoreDirector for incremental scoring.
+async fn analyze_schedule(
+    Json(dto): Json<ScheduleDto>,
+) -> Json<AnalyzeResponse> {
+    use crate::constraints::create_fluent_constraints;
+    use solverforge::{ConstraintSet, TypedScoreDirector};
 
     let schedule = dto.to_domain();
 
-    // Use public API for constraint analysis
-    let analysis = solution_manager().analyze(&schedule);
+    // Use fluent API constraints for zero-erasure scoring
+    let constraints = create_fluent_constraints();
+    let mut director = TypedScoreDirector::new(schedule, constraints);
 
-    let constraints_dto: Vec<ConstraintAnalysisDto> = analysis
-        .constraints
+    let score = director.calculate_score();
+
+    // Get per-constraint breakdown with detailed matches
+    let analyses = director.constraints().evaluate_detailed(director.working_solution());
+
+    let constraints_dto: Vec<ConstraintAnalysisDto> = analyses
         .into_iter()
-        .map(|c| ConstraintAnalysisDto {
-            name: c.name,
-            constraint_type: "soft".to_string(), // HardSoftScore doesn't track this per-constraint
-            weight: format!("{}", c.weight),
-            score: format!("{}", c.score),
-            matches: Vec::new(), // Simplified - detailed matches not exposed yet
+        .map(|analysis| {
+            ConstraintAnalysisDto {
+                name: analysis.constraint_ref.name.clone(),
+                constraint_type: if analysis.is_hard { "hard" } else { "soft" }.to_string(),
+                weight: format!("{}", analysis.weight),
+                score: format!("{}", analysis.score),
+                matches: analysis
+                    .matches
+                    .iter()
+                    .map(|m| ConstraintMatchDto {
+                        score: format!("{}", m.score),
+                        justification: m.justification.description.clone(),
+                    })
+                    .collect(),
+            }
         })
         .collect();
 
     Json(AnalyzeResponse {
-        score: format!("{}", analysis.score),
+        score: format!("{}", score),
         constraints: constraints_dto,
     })
 }
