@@ -277,12 +277,12 @@ fn solve_blocking(
     // Create nearby 3-opt phase using fluent builder
     let phase_factory = KOptPhaseBuilder::<VehicleRoutePlan, usize, _>::new(
         VrpDistanceMeter,
-        || Box::new(FromSolutionEntitySelector::new(0)),
+        || Box::new(FromSolutionEntitySelector::new(1)),
         VehicleRoutePlan::list_len,
         VehicleRoutePlan::sublist_remove,
         VehicleRoutePlan::sublist_insert,
         "visits",
-        0, // entity_descriptor_index for vehicles
+        1, // entity_descriptor_index for vehicles
     )
     .with_k(3)
     .with_nearby(10)
