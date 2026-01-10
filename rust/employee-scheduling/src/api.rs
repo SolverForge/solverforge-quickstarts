@@ -274,7 +274,7 @@ async fn get_schedule(
             let job_guard = job.read();
             Ok(Json(ScheduleDto::from_schedule(
                 &job_guard.schedule,
-                Some(job_guard.status.clone()),
+                Some(job_guard.status),
             )))
         }
         None => Err(StatusCode::NOT_FOUND),
@@ -299,7 +299,7 @@ async fn get_schedule_status(
             let job_guard = job.read();
             Ok(Json(StatusResponse {
                 score: job_guard.schedule.score.map(|s| format!("{}", s)),
-                solver_status: job_guard.status.clone(),
+                solver_status: job_guard.status,
             }))
         }
         None => Err(StatusCode::NOT_FOUND),
