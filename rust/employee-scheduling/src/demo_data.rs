@@ -344,4 +344,18 @@ mod tests {
             "Should have medical locations"
         );
     }
+
+    #[test]
+    fn test_empty_schedule_has_score() {
+        use crate::domain::EmployeeSchedule;
+
+        // Empty schedule with no shifts and no employees
+        let schedule = EmployeeSchedule::new(vec![], vec![]);
+        let result = schedule.solve();
+
+        assert!(
+            result.score.is_some(),
+            "Empty schedule should have a score after solving, got None"
+        );
+    }
 }

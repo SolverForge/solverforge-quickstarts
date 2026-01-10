@@ -271,7 +271,7 @@ async fn get_schedule(
 ) -> Result<Json<ScheduleDto>, StatusCode> {
     match state.solver.get_job(&id) {
         Some(job) => {
-            let job_guard = job.read();
+            let job_guard = job.lock();
             Ok(Json(ScheduleDto::from_schedule(
                 &job_guard.schedule,
                 Some(job_guard.status),
@@ -296,7 +296,7 @@ async fn get_schedule_status(
 ) -> Result<Json<StatusResponse>, StatusCode> {
     match state.solver.get_job(&id) {
         Some(job) => {
-            let job_guard = job.read();
+            let job_guard = job.lock();
             Ok(Json(StatusResponse {
                 score: job_guard.schedule.score.map(|s| format!("{}", s)),
                 solver_status: job_guard.status,
