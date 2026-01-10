@@ -1,13 +1,11 @@
 //! Domain model for Employee Scheduling Problem.
 
 use chrono::{NaiveDate, NaiveDateTime};
-use serde::{Deserialize, Serialize};
 use solverforge::prelude::*;
 use std::collections::HashSet;
 
 /// An employee who can be assigned to shifts.
-#[problem_fact]
-#[derive(Serialize, Deserialize)]
+#[problem_fact(serde)]
 pub struct Employee {
     /// Index of this employee in `EmployeeSchedule.employees` for O(1) join matching.
     pub index: usize,
@@ -57,37 +55,16 @@ impl Employee {
         self.desired_days.sort();
     }
 
-    pub fn with_skill(mut self, skill: impl Into<String>) -> Self {
-        self.skills.insert(skill.into());
-        self
-    }
-
     pub fn with_skills(mut self, skills: impl IntoIterator<Item = impl Into<String>>) -> Self {
         for skill in skills {
             self.skills.insert(skill.into());
         }
         self
     }
-
-    pub fn with_unavailable_date(mut self, date: NaiveDate) -> Self {
-        self.unavailable_dates.insert(date);
-        self
-    }
-
-    pub fn with_undesired_date(mut self, date: NaiveDate) -> Self {
-        self.undesired_dates.insert(date);
-        self
-    }
-
-    pub fn with_desired_date(mut self, date: NaiveDate) -> Self {
-        self.desired_dates.insert(date);
-        self
-    }
 }
 
 /// A shift that needs to be staffed by an employee.
-#[planning_entity]
-#[derive(Serialize, Deserialize)]
+#[planning_entity(serde)]
 pub struct Shift {
     #[planning_id]
     pub id: String,
@@ -123,16 +100,16 @@ impl Shift {
     pub fn date(&self) -> NaiveDate {
         self.start.date()
     }
-
-    /// Returns the duration in hours.
-    pub fn duration_hours(&self) -> f64 {
-        (self.end - self.start).num_minutes() as f64 / 60.0
-    }
 }
 
 /// The employee scheduling solution.
-#[planning_solution]
-#[derive(Serialize, Deserialize)]
+#[planning_solution(serde, constraints = "crate::constraints::create_fluent_constraints")]
+#[basic_variable_config(
+    entity_collection = "shifts",
+    variable_field = "employee_idx",
+    variable_type = "usize",
+    value_range = "employees"
+)]
 pub struct EmployeeSchedule {
     #[problem_fact_collection]
     pub employees: Vec<Employee>,
@@ -154,15 +131,4 @@ impl EmployeeSchedule {
         }
     }
 
-    /// Gets an Employee by index (O(1)).
-    #[inline]
-    pub fn get_employee(&self, idx: usize) -> Option<&Employee> {
-        self.employees.get(idx)
-    }
-
-    /// Returns the number of employees.
-    #[inline]
-    pub fn employee_count(&self) -> usize {
-        self.employees.len()
-    }
 }
