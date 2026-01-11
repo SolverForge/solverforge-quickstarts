@@ -6,9 +6,8 @@
 //! Run with: cargo run -p employee-scheduling
 //! Then open: http://localhost:7860
 
-use employee_scheduling::{api, console};
+use employee_scheduling::api;
 
-use owo_colors::OwoColorize;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -17,9 +16,6 @@ use tower_http::services::ServeDir;
 
 #[tokio::main]
 async fn main() {
-    // Print colorful banner
-    console::print_banner();
-
     // Create shared application state
     let state = Arc::new(api::AppState::new());
 
@@ -43,16 +39,7 @@ async fn main() {
 
     // Bind and serve
     let addr = SocketAddr::from(([0, 0, 0, 0], 7860));
-    println!(
-        "{} Server listening on {}",
-        "▸".bright_green(),
-        format!("http://{}", addr).bright_cyan().underline()
-    );
-    println!(
-        "{} Open {} in your browser\n",
-        "▸".bright_green(),
-        "http://localhost:7860".bright_cyan().underline()
-    );
+    println!("Server listening on http://{}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
