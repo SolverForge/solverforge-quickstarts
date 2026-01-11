@@ -6,7 +6,7 @@ description = "Vehicle routing quickstart for SolverForge"
 publish = false
 
 [dependencies]
-solverforge = { path = "../../../solverforge-rs/crates/solverforge", features = ["serde"] }
+solverforge = { path = "../../../solverforge-rs/crates/solverforge", features = ["serde", "console"] }
 rand = "0.8"
 
 axum = "0.8"
@@ -17,10 +17,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 parking_lot = "0.12"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-owo-colors = "4.2"
-num-format = "0.4.4"
 chrono = { version = "0.4", features = ["serde"] }
 utoipa = { version = "5", features = ["axum_extras"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
