@@ -5,13 +5,6 @@ edition = "2021"
 description = "Employee scheduling quickstart for SolverForge"
 publish = false
 
-[features]
-default = ["console"]
-console = []
-
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"console\"))"] }
-
 [dependencies]
 solverforge = { path = "../../../solverforge-rs/crates/solverforge", features = ["serde", "console"] }
 rand = "0.8"

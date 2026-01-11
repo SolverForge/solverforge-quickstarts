@@ -16,6 +16,8 @@ use tower_http::services::ServeDir;
 
 #[tokio::main]
 async fn main() {
+    solverforge::console::init();
+
     // Create shared application state
     let state = Arc::new(api::AppState::new());
 
