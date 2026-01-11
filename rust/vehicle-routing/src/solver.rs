@@ -1,15 +1,17 @@
 //! Solver service for Vehicle Routing Problem.
+//!
+//! Uses the public SolverForge API.
 
-use parking_lot::RwLock;
+use parking_lot::Mutex;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::sync::oneshot;
-use tracing::info;
 
 use crate::domain::VehicleRoutePlan;
+use solverforge::{run_solver_with_events, Score, SolverEvent};
 
+use crate::constraints::define_constraints;
+
+/// Status of a solving job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum SolverStatus {
@@ -17,93 +19,119 @@ pub enum SolverStatus {
     Solving,
 }
 
+impl SolverStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SolverStatus::NotSolving => "NOT_SOLVING",
+            SolverStatus::Solving => "SOLVING",
+        }
+    }
+}
+
+/// A solving job with current state.
 pub struct SolveJob {
     pub id: String,
     pub status: SolverStatus,
     pub plan: VehicleRoutePlan,
-    stop_signal: Option<oneshot::Sender<()>>,
 }
 
+impl SolveJob {
+    pub fn new(id: String, plan: VehicleRoutePlan) -> Self {
+        Self {
+            id,
+            status: SolverStatus::NotSolving,
+            plan,
+        }
+    }
+}
+
+/// Manages VRP solving jobs.
 pub struct SolverService {
-    jobs: RwLock<HashMap<String, Arc<RwLock<SolveJob>>>>,
+    jobs: Mutex<HashMap<String, Arc<Mutex<SolveJob>>>>,
 }
 
 impl SolverService {
     pub fn new() -> Self {
-        Self { jobs: RwLock::new(HashMap::new()) }
+        Self {
+            jobs: Mutex::new(HashMap::new()),
+        }
     }
 
-    pub fn create_job(&self, id: String, plan: VehicleRoutePlan) -> Arc<RwLock<SolveJob>> {
-        let job = Arc::new(RwLock::new(SolveJob {
-            id: id.clone(),
-            status: SolverStatus::NotSolving,
-            plan,
-            stop_signal: None,
-        }));
-        self.jobs.write().insert(id, job.clone());
+    pub fn create_job(&self, id: String, plan: VehicleRoutePlan) -> Arc<Mutex<SolveJob>> {
+        let job = Arc::new(Mutex::new(SolveJob::new(id.clone(), plan)));
+        self.jobs.lock().insert(id, job.clone());
         job
     }
 
-    pub fn get_job(&self, id: &str) -> Option<Arc<RwLock<SolveJob>>> {
-        self.jobs.read().get(id).cloned()
+    pub fn get_job(&self, id: &str) -> Option<Arc<Mutex<SolveJob>>> {
+        self.jobs.lock().get(id).cloned()
     }
 
-    pub fn remove_job(&self, id: &str) -> Option<Arc<RwLock<SolveJob>>> {
-        self.jobs.write().remove(id)
+    pub fn list_jobs(&self) -> Vec<String> {
+        self.jobs.lock().keys().cloned().collect()
     }
 
-    pub fn start_solving(&self, job: Arc<RwLock<SolveJob>>) {
-        let (tx, rx) = oneshot::channel();
-        {
-            let mut guard = job.write();
-            guard.status = SolverStatus::Solving;
-            guard.stop_signal = Some(tx);
-        }
+    pub fn remove_job(&self, id: &str) -> Option<Arc<Mutex<SolveJob>>> {
+        self.jobs.lock().remove(id)
+    }
+
+    pub fn start_solving(&self, job: Arc<Mutex<SolveJob>>) {
+        job.lock().status = SolverStatus::Solving;
 
         let job_clone = job.clone();
-        tokio::task::spawn_blocking(move || solve_blocking(job_clone, rx));
+        tokio::task::spawn_blocking(move || {
+            solve_blocking(job_clone);
+        });
     }
 
     pub fn stop_solving(&self, id: &str) -> bool {
         if let Some(job) = self.get_job(id) {
-            let mut guard = job.write();
-            if let Some(signal) = guard.stop_signal.take() {
-                let _ = signal.send(());
-                guard.status = SolverStatus::NotSolving;
-                return true;
-            }
+            job.lock().status = SolverStatus::NotSolving;
+            true
+        } else {
+            false
         }
-        false
     }
 }
 
-fn solve_blocking(job: Arc<RwLock<SolveJob>>, mut stop_rx: oneshot::Receiver<()>) {
-    let solution = job.read().plan.clone();
-    let job_id = job.read().id.clone();
-    let start = Instant::now();
+impl Default for SolverService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
-    info!(job_id = %job_id, "Starting solver");
+/// Runs the solver using the public SolverForge API.
+fn solve_blocking(job: Arc<Mutex<SolveJob>>) {
+    let initial_plan = job.lock().plan.clone();
 
-    // External cancellation signal (user stops solving)
-    // Time limit comes from solver.toml, not hardcoded here
-    let terminate = Arc::new(AtomicBool::new(false));
-    let terminate_clone = terminate.clone();
-
-    std::thread::spawn(move || {
-        loop {
-            if stop_rx.try_recv().is_ok() {
-                terminate_clone.store(true, Ordering::SeqCst);
-                break;
+    let job_for_callback = job.clone();
+    let result = run_solver_with_events(
+        initial_plan,
+        VehicleRoutePlan::finalize_all,
+        define_constraints,
+        VehicleRoutePlan::list_get_element,
+        VehicleRoutePlan::list_set_element,
+        VehicleRoutePlan::element_count,
+        VehicleRoutePlan::n_entities,
+        VehicleRoutePlan::descriptor,
+        VehicleRoutePlan::entity_count,
+        |event| match event {
+            SolverEvent::BestSolutionChanged { score, .. } => {
+                println!("New best: {}", score);
             }
-            std::thread::sleep(Duration::from_millis(100));
-        }
-    });
+            SolverEvent::Ended { final_score, .. } => {
+                println!("Finished: {} (feasible: {})", final_score, final_score.is_feasible());
+            }
+            _ => {}
+        },
+        move |best_solution, score| {
+            let mut job_guard = job_for_callback.lock();
+            job_guard.plan = best_solution.clone();
+            job_guard.plan.score = Some(score);
+        },
+    );
 
-    let result = solution.solve_with_terminate(Some(terminate));
-
-    info!(job_id = %job_id, duration = ?start.elapsed(), score = ?result.score, "Solving complete");
-
-    let mut guard = job.write();
-    guard.plan = result;
-    guard.status = SolverStatus::NotSolving;
+    let mut job_guard = job.lock();
+    job_guard.plan = result;
+    job_guard.status = SolverStatus::NotSolving;
 }
