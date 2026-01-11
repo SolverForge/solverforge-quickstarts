@@ -14,18 +14,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
-use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() {
-    // Initialize tracing (logs from employee_scheduling at INFO level)
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::from_default_env()
-                .add_directive("employee_scheduling=info".parse().unwrap()),
-        )
-        .init();
-
     // Print colorful banner
     console::print_banner();
 

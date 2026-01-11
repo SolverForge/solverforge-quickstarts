@@ -935,6 +935,7 @@ dependencies = [
  "solverforge-core",
  "solverforge-scoring",
  "thiserror",
+ "tokio",
  "tracing",
 ]
 

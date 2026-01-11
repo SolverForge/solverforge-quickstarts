@@ -1,6 +1,6 @@
 //! Solver configuration for Employee Scheduling.
 //!
-//! Follows Timefold's pattern:
+//! Follows the split pattern:
 //! - `SolverManager` - async job management (solve, terminate, status)
 //! - `SolutionManager` - stateless analysis (analyze constraints)
 
