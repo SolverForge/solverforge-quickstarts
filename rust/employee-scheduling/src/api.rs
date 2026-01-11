@@ -14,18 +14,14 @@ use uuid::Uuid;
 
 use crate::demo_data::{self, DemoData};
 use crate::domain::{Employee, EmployeeSchedule, Shift};
-use crate::solver::{SolverService, SolverStatus};
+use crate::solver::{solver_manager, SolverStatus};
 
-/// Application state shared across handlers.
-pub struct AppState {
-    pub solver: SolverService,
-}
+/// Application state shared across handlers (empty - solver_manager is a static singleton).
+pub struct AppState;
 
 impl AppState {
     pub fn new() -> Self {
-        Self {
-            solver: SolverService::new(),
-        }
+        Self
     }
 }
 
@@ -249,33 +245,35 @@ async fn get_demo_data(Path(id): Path<String>) -> Result<Json<ScheduleDto>, Stat
 /// POST /schedules - Create and start solving a schedule.
 /// Returns the job ID as plain text.
 async fn create_schedule(
-    State(state): State<Arc<AppState>>,
+    State(_state): State<Arc<AppState>>,
     Json(dto): Json<ScheduleDto>,
 ) -> String {
     let id = Uuid::new_v4().to_string();
     let schedule = dto.to_domain();
-    let job = state.solver.create_job(id.clone(), schedule);
-    state.solver.start_solving(job);
+
+    let job_id = id.clone();
+    solver_manager().solve_and_listen(id.clone(), schedule, move |solution| {
+        // Update stored solution when best solution improves
+        solver_manager().update_solution(&job_id, solution.clone());
+    });
+
     id
 }
 
 /// GET /schedules - List all schedule IDs.
-async fn list_schedules(State(state): State<Arc<AppState>>) -> Json<Vec<String>> {
-    Json(state.solver.list_jobs())
+async fn list_schedules(State(_state): State<Arc<AppState>>) -> Json<Vec<String>> {
+    Json(solver_manager().list_jobs())
 }
 
 /// GET /schedules/{id} - Get a schedule's current state.
 async fn get_schedule(
-    State(state): State<Arc<AppState>>,
+    State(_state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<ScheduleDto>, StatusCode> {
-    match state.solver.get_job(&id) {
-        Some(job) => {
-            let job_guard = job.lock();
-            Ok(Json(ScheduleDto::from_schedule(
-                &job_guard.schedule,
-                Some(job_guard.status),
-            )))
+    match solver_manager().get_solution(&id) {
+        Some(schedule) => {
+            let status = solver_manager().get_solver_status(&id);
+            Ok(Json(ScheduleDto::from_schedule(&schedule, Some(status))))
         }
         None => Err(StatusCode::NOT_FOUND),
     }
@@ -291,28 +289,26 @@ pub struct StatusResponse {
 
 /// GET /schedules/{id}/status - Get a schedule's status.
 async fn get_schedule_status(
-    State(state): State<Arc<AppState>>,
+    State(_state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<StatusResponse>, StatusCode> {
-    match state.solver.get_job(&id) {
-        Some(job) => {
-            let job_guard = job.lock();
-            Ok(Json(StatusResponse {
-                score: job_guard.schedule.score.map(|s| format!("{}", s)),
-                solver_status: job_guard.status,
-            }))
-        }
+    match solver_manager().get_solution(&id) {
+        Some(schedule) => Ok(Json(StatusResponse {
+            score: schedule.score.map(|s| format!("{}", s)),
+            solver_status: solver_manager().get_solver_status(&id),
+        })),
         None => Err(StatusCode::NOT_FOUND),
     }
 }
 
 /// DELETE /schedules/{id} - Stop solving and remove a schedule.
 async fn stop_solving(
-    State(state): State<Arc<AppState>>,
+    State(_state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> StatusCode {
-    state.solver.stop_solving(&id);
-    if state.solver.remove_job(&id).is_some() {
+    solver_manager().terminate_early(&id);
+    solver_manager().mark_finished(&id);
+    if solver_manager().remove_job(&id).is_some() {
         StatusCode::NO_CONTENT
     } else {
         StatusCode::NOT_FOUND
@@ -349,46 +345,29 @@ pub struct AnalyzeResponse {
 
 /// PUT /schedules/analyze - Analyze constraints for a schedule.
 ///
-/// Uses TypedScoreDirector for incremental scoring.
-async fn analyze_schedule(
-    Json(dto): Json<ScheduleDto>,
-) -> Json<AnalyzeResponse> {
-    use crate::constraints::create_fluent_constraints;
-    use solverforge::{ConstraintSet, TypedScoreDirector};
+/// Uses the SolutionManager.analyze() API.
+async fn analyze_schedule(Json(dto): Json<ScheduleDto>) -> Json<AnalyzeResponse> {
+    use crate::solver::solution_manager;
 
     let schedule = dto.to_domain();
 
-    // Use fluent API constraints for zero-erasure scoring
-    let constraints = create_fluent_constraints();
-    let mut director = TypedScoreDirector::new(schedule, constraints);
+    // Use public API for constraint analysis
+    let analysis = solution_manager().analyze(&schedule);
 
-    let score = director.calculate_score();
-
-    // Get per-constraint breakdown with detailed matches
-    let analyses = director.constraints().evaluate_detailed(director.working_solution());
-
-    let constraints_dto: Vec<ConstraintAnalysisDto> = analyses
+    let constraints_dto: Vec<ConstraintAnalysisDto> = analysis
+        .constraints
         .into_iter()
-        .map(|analysis| {
-            ConstraintAnalysisDto {
-                name: analysis.constraint_ref.name.clone(),
-                constraint_type: if analysis.is_hard { "hard" } else { "soft" }.to_string(),
-                weight: format!("{}", analysis.weight),
-                score: format!("{}", analysis.score),
-                matches: analysis
-                    .matches
-                    .iter()
-                    .map(|m| ConstraintMatchDto {
-                        score: format!("{}", m.score),
-                        justification: m.justification.description.clone(),
-                    })
-                    .collect(),
-            }
+        .map(|c| ConstraintAnalysisDto {
+            name: c.name,
+            constraint_type: "soft".to_string(), // HardSoftScore doesn't track this per-constraint
+            weight: format!("{}", c.weight),
+            score: format!("{}", c.score),
+            matches: Vec::new(), // Simplified - detailed matches not exposed yet
         })
         .collect();
 
     Json(AnalyzeResponse {
-        score: format!("{}", score),
+        score: format!("{}", analysis.score),
         constraints: constraints_dto,
     })
 }
