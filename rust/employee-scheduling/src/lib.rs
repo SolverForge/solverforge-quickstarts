@@ -6,7 +6,6 @@
 //! Uses zero-erasure typed constraints via `TypedScoreDirector`.
 
 pub mod api;
-pub mod console;
 pub mod constraints;
 pub mod demo_data;
 pub mod domain;
