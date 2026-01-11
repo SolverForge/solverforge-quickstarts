@@ -17,7 +17,6 @@
 //! - **Travel time** (soft): Minimize total driving time
 
 pub mod api;
-pub mod console;
 pub mod constraints;
 pub mod demo_data;
 pub mod domain;
