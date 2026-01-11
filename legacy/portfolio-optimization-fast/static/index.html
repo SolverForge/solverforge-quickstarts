@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <title>Portfolio Optimization - SolverForge for Python</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="/webjars/solverforge/css/solverforge-webui.css">
+  <link rel="icon" href="/webjars/solverforge/img/solverforge-favicon.svg" type="image/svg+xml">
+  <style>
+    /* Solving spinner */
+    #solvingSpinner {
+      display: none;
+      width: 1.25rem;
+      height: 1.25rem;
+      border: 2px solid #10b981;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+      vertical-align: middle;
+    }
+    #solvingSpinner.active {
+      display: inline-block;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Sector badge colors */
+    .sector-badge {
+      font-size: 0.75rem;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-weight: 500;
+    }
+    .sector-Technology { background: #3b82f6; color: white; }
+    .sector-Healthcare { background: #10b981; color: white; }
+    .sector-Finance { background: #eab308; color: #1a1a1a; }
+    .sector-Energy { background: #ef4444; color: white; }
+    .sector-Consumer { background: #a855f7; color: white; }
+
+    /* KPI Cards */
+    .kpi-card {
+      background: white;
+      border-radius: 12px;
+      padding: 1.5rem;
+      text-align: center;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .kpi-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    .kpi-value {
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: #10b981;
+      line-height: 1.2;
+      transition: all 0.3s ease;
+    }
+    .kpi-value.updating {
+      opacity: 0.5;
+    }
+    .kpi-value.positive { color: #10b981; }
+    .kpi-value.negative { color: #ef4444; }
+    .kpi-label {
+      font-size: 0.85rem;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-top: 0.5rem;
+    }
+    .kpi-icon {
+      font-size: 1.5rem;
+      color: #94a3b8;
+      margin-bottom: 0.5rem;
+    }
+
+    /* Chart containers */
+    .chart-card {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      height: 100%;
+    }
+    .chart-card-header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid #e2e8f0;
+      font-weight: 600;
+      color: #1e293b;
+    }
+    .chart-card-body {
+      padding: 1rem;
+    }
+    .chart-container {
+      position: relative;
+      height: 280px;
+    }
+
+    /* Stock table */
+    .stock-table {
+      font-size: 0.9rem;
+    }
+    .stock-table th {
+      background: #f8fafc;
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      letter-spacing: 0.05em;
+      color: #64748b;
+      border-bottom: 2px solid #e2e8f0;
+      cursor: pointer;
+      user-select: none;
+    }
+    .stock-table th:hover {
+      background: #f1f5f9;
+    }
+    .stock-table th i {
+      margin-left: 4px;
+      opacity: 0.5;
+    }
+    .stock-table th.sorted i {
+      opacity: 1;
+      color: #10b981;
+    }
+    .stock-selected {
+      background: #f0fdf4 !important;
+    }
+    .stock-table tr {
+      transition: background-color 0.15s ease;
+    }
+    .stock-table tbody tr:hover {
+      background: #f8fafc;
+    }
+    .return-positive { color: #10b981; font-weight: 600; }
+    .return-negative { color: #ef4444; font-weight: 600; }
+
+    /* Score display */
+    .score-badge {
+      display: inline-block;
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+    .score-hard {
+      background: #fef2f2;
+      color: #dc2626;
+      border: 1px solid #fecaca;
+    }
+    .score-soft {
+      background: #f0fdf4;
+      color: #16a34a;
+      border: 1px solid #bbf7d0;
+    }
+    .score-feasible {
+      background: #f0fdf4;
+      color: #16a34a;
+    }
+    .score-infeasible {
+      background: #fef2f2;
+      color: #dc2626;
+    }
+
+    /* Data selector dropdown */
+    .data-selector {
+      background: #10b981;
+      color: white;
+      border: none;
+      border-radius: 1.5rem;
+      padding: 0.5rem 1rem;
+      font-weight: 500;
+    }
+    .data-selector:focus {
+      box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3);
+    }
+
+    /* Notification panel */
+    #notificationPanel {
+      z-index: 1050;
+    }
+
+    /* Copy button for code blocks */
+    .copy-btn {
+      position: absolute;
+      top: 0.5rem;
+      right: 0.5rem;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .code-block:hover .copy-btn {
+      opacity: 1;
+    }
+    .code-block {
+      position: relative;
+    }
+
+    /* Progress animation during solving */
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+    .solving-pulse {
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    /* ==========================================================
+       ADVANCED SETTINGS STYLES (OPTIONAL)
+       Remove this section for a simpler quickstart.
+       ========================================================== */
+    .settings-card {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .settings-card .card-body {
+      padding: 1.25rem;
+    }
+    .form-range::-webkit-slider-thumb {
+      background: #10b981;
+    }
+    .form-range::-moz-range-thumb {
+      background: #10b981;
+    }
+    .preset-badge {
+      font-size: 0.7rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: #f1f5f9;
+      color: #64748b;
+      margin-left: 0.5rem;
+    }
+    .config-value {
+      font-weight: 600;
+      color: #10b981;
+    }
+    /* END ADVANCED SETTINGS STYLES */
+  </style>
+</head>
+<body>
+
+<header id="solverforge-auto-header">
+  <!-- Filled by solverforge-webui.js -->
+</header>
+
+<div class="tab-content">
+  <!-- Tab 1: Demo UI -->
+  <div id="demo" class="tab-pane fade show active container-fluid">
+    <div class="sticky-top d-flex justify-content-center align-items-center">
+      <div id="notificationPanel" style="position: absolute; top: .5rem;"></div>
+    </div>
+
+    <h1>Portfolio Optimization</h1>
+    <p>Select optimal stocks to maximize expected returns while meeting sector exposure constraints.</p>
+
+    <!-- Control Bar -->
+    <div class="container-fluid mb-3">
+      <div class="row justify-content-between align-items-center">
+        <div class="col-auto">
+          <ul class="nav nav-pills" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active" id="portfolioTab" data-bs-toggle="tab" data-bs-target="#portfolioPanel"
+                      type="button" role="tab" aria-controls="portfolioPanel" aria-selected="true">
+                <i class="fas fa-chart-pie me-1"></i> Portfolio
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="stocksTab" data-bs-toggle="tab" data-bs-target="#stocksPanel"
+                      type="button" role="tab" aria-controls="stocksPanel" aria-selected="false">
+                <i class="fas fa-list me-1"></i> All Stocks
+              </button>
+            </li>
+          </ul>
+        </div>
+        <div class="col-auto">
+          <select id="dataSelector" class="data-selector me-2">
+            <option value="SMALL">Small (25 stocks)</option>
+            <option value="LARGE">Large (51 stocks)</option>
+          </select>
+          <!-- ============================================================
+               ADVANCED SETTINGS BUTTON (OPTIONAL)
+               Remove this button and the panel below for a simpler quickstart.
+               Also remove config.js script at the bottom of the file.
+               ============================================================ -->
+          <button class="btn btn-outline-secondary btn-sm me-2" type="button"
+                  data-bs-toggle="collapse" data-bs-target="#advancedSettings"
+                  aria-expanded="false" aria-controls="advancedSettings"
+                  id="advancedSettingsBtn">
+            <i class="fas fa-cog"></i> Advanced
+          </button>
+          <!-- END ADVANCED SETTINGS BUTTON -->
+          <button id="solveButton" type="button" class="btn btn-success">
+            <i class="fas fa-play"></i> Solve
+          </button>
+          <button id="stopSolvingButton" type="button" class="btn btn-danger" style="display: none;">
+            <i class="fas fa-stop"></i> Stop
+          </button>
+          <span id="solvingSpinner" class="ms-2"></span>
+          <span id="score" class="ms-2 fw-bold">Score: ?</span>
+          <button id="analyzeButton" type="button" class="btn btn-secondary ms-2" title="Analyze constraints">
+            <i class="fas fa-question"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- ============================================================
+           ADVANCED SETTINGS PANEL (OPTIONAL)
+           This entire panel can be removed for a simpler quickstart.
+           If removed, also remove:
+           - The "Advanced" button above
+           - config.js script at the bottom of the file
+           ============================================================ -->
+      <div class="collapse mt-3" id="advancedSettings">
+        <div class="settings-card">
+          <div class="card-body">
+            <div class="row g-4">
+              <!-- Preset Selector -->
+              <div class="col-md-3">
+                <label class="form-label fw-bold">
+                  <i class="fas fa-sliders-h me-1 text-muted"></i>Preset
+                </label>
+                <select id="presetSelector" class="form-select">
+                  <option value="balanced" selected>Balanced (Default)</option>
+                  <option value="conservative">Conservative</option>
+                  <option value="aggressive">Aggressive</option>
+                  <option value="quick">Quick Test</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </div>
+
+              <!-- Target Stocks Slider -->
+              <div class="col-md-3">
+                <label class="form-label">
+                  Target Stocks: <span id="targetStocksValue" class="config-value">20</span>
+                </label>
+                <input type="range" class="form-range" id="targetStocksSlider"
+                       min="5" max="50" value="20">
+                <div class="d-flex justify-content-between text-muted" style="font-size: 0.7rem;">
+                  <span>5</span>
+                  <span>50</span>
+                </div>
+              </div>
+
+              <!-- Max Sector Slider -->
+              <div class="col-md-3">
+                <label class="form-label">
+                  Max Sector: <span id="maxSectorValue" class="config-value">25%</span>
+                </label>
+                <input type="range" class="form-range" id="maxSectorSlider"
+                       min="10" max="50" value="25">
+                <div class="d-flex justify-content-between text-muted" style="font-size: 0.7rem;">
+                  <span>10%</span>
+                  <span>50%</span>
+                </div>
+              </div>
+
+              <!-- Solver Time Slider -->
+              <div class="col-md-3">
+                <label class="form-label">
+                  Solver Time: <span id="solverTimeValue" class="config-value">30s</span>
+                </label>
+                <input type="range" class="form-range" id="solverTimeSlider"
+                       min="10" max="300" step="10" value="30">
+                <div class="d-flex justify-content-between text-muted" style="font-size: 0.7rem;">
+                  <span>10s</span>
+                  <span>5min</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Preset Description -->
+            <div class="mt-3 text-muted" style="font-size: 0.85rem;">
+              <i class="fas fa-info-circle me-1"></i>
+              <span id="presetDescription">Balanced settings for typical portfolio optimization.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- END ADVANCED SETTINGS PANEL -->
+    </div>
+
+    <!-- Inner tab content -->
+    <div class="tab-content">
+      <!-- Portfolio View -->
+      <div class="tab-pane fade show active" id="portfolioPanel" role="tabpanel" aria-labelledby="portfolioTab">
+        <!-- KPI Row 1: Core Metrics -->
+        <div class="row mb-3 g-3">
+          <div class="col-md-3 col-sm-6">
+            <div class="kpi-card">
+              <div class="kpi-icon"><i class="fas fa-check-circle"></i></div>
+              <div class="kpi-value" id="selectedCount">0/20</div>
+              <div class="kpi-label">Selected Stocks</div>
+            </div>
+          </div>
+          <div class="col-md-3 col-sm-6">
+            <div class="kpi-card">
+              <div class="kpi-icon"><i class="fas fa-chart-line"></i></div>
+              <div class="kpi-value positive" id="expectedReturn">0.00%</div>
+              <div class="kpi-label">Expected Return</div>
+            </div>
+          </div>
+          <div class="col-md-3 col-sm-6">
+            <div class="kpi-card">
+              <div class="kpi-icon"><i class="fas fa-layer-group"></i></div>
+              <div class="kpi-value" id="sectorCount">0</div>
+              <div class="kpi-label">Sectors</div>
+            </div>
+          </div>
+          <div class="col-md-3 col-sm-6">
+            <div class="kpi-card" id="diversificationTooltip" data-bs-toggle="tooltip" title="Higher = more diversified. Based on Herfindahl-Hirschman Index (HHI).">
+              <div class="kpi-icon"><i class="fas fa-shuffle"></i></div>
+              <div class="kpi-value" id="diversificationScore">0%</div>
+              <div class="kpi-label">Diversification <i class="fas fa-info-circle text-muted" style="font-size: 0.7rem;"></i></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- KPI Row 2: Risk Metrics -->
+        <div class="row mb-4 g-3">
+          <div class="col-md-3 col-sm-6">
+            <div class="kpi-card" data-bs-toggle="tooltip" title="Highest single sector weight. Lower is more diversified.">
+              <div class="kpi-icon"><i class="fas fa-chart-pie"></i></div>
+              <div class="kpi-value" id="maxSectorExposure">0%</div>
+              <div class="kpi-label">Max Sector <i class="fas fa-info-circle text-muted" style="font-size: 0.7rem;"></i></div>
+            </div>
+          </div>
+          <div class="col-md-3 col-sm-6">
+            <div class="kpi-card" data-bs-toggle="tooltip" title="Standard deviation of predicted returns. Lower = less risk.">
+              <div class="kpi-icon"><i class="fas fa-wave-square"></i></div>
+              <div class="kpi-value" id="returnVolatility">0.00%</div>
+              <div class="kpi-label">Volatility <i class="fas fa-info-circle text-muted" style="font-size: 0.7rem;"></i></div>
+            </div>
+          </div>
+          <div class="col-md-3 col-sm-6">
+            <div class="kpi-card" data-bs-toggle="tooltip" title="Return / Volatility ratio. Higher = better risk-adjusted return.">
+              <div class="kpi-icon"><i class="fas fa-scale-balanced"></i></div>
+              <div class="kpi-value" id="sharpeProxy">0.00</div>
+              <div class="kpi-label">Sharpe Proxy <i class="fas fa-info-circle text-muted" style="font-size: 0.7rem;"></i></div>
+            </div>
+          </div>
+          <div class="col-md-3 col-sm-6">
+            <div class="kpi-card" data-bs-toggle="tooltip" title="Herfindahl-Hirschman Index. Lower = more diversified. <0.15 is well-diversified.">
+              <div class="kpi-icon"><i class="fas fa-bullseye"></i></div>
+              <div class="kpi-value" id="herfindahlIndex">0.000</div>
+              <div class="kpi-label">HHI <i class="fas fa-info-circle text-muted" style="font-size: 0.7rem;"></i></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Charts Row -->
+        <div class="row mb-4 g-3">
+          <div class="col-md-6">
+            <div class="chart-card">
+              <div class="chart-card-header">
+                <i class="fas fa-chart-pie me-2 text-muted"></i>Sector Allocation
+              </div>
+              <div class="chart-card-body">
+                <div class="chart-container">
+                  <canvas id="sectorChart"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="chart-card">
+              <div class="chart-card-header">
+                <i class="fas fa-chart-bar me-2 text-muted"></i>Top Returns (Selected)
+              </div>
+              <div class="chart-card-body">
+                <div class="chart-container">
+                  <canvas id="returnsChart"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Selected Stocks Summary -->
+        <div class="row">
+          <div class="col-12">
+            <div class="chart-card">
+              <div class="chart-card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-star me-2 text-warning"></i>Selected Stocks</span>
+                <span class="badge bg-success" id="selectedBadge">0 selected</span>
+              </div>
+              <div class="chart-card-body p-0">
+                <div class="table-responsive">
+                  <table class="table table-hover stock-table mb-0">
+                    <thead>
+                      <tr>
+                        <th>Ticker</th>
+                        <th>Company</th>
+                        <th>Sector</th>
+                        <th>Predicted Return</th>
+                        <th>Weight</th>
+                      </tr>
+                    </thead>
+                    <tbody id="selectedStocksTable">
+                      <tr>
+                        <td colspan="5" class="text-center text-muted py-4">
+                          <i class="fas fa-info-circle me-2"></i>Click "Solve" to optimize your portfolio
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- All Stocks View -->
+      <div class="tab-pane fade" id="stocksPanel" role="tabpanel" aria-labelledby="stocksTab">
+        <div class="chart-card">
+          <div class="chart-card-header d-flex justify-content-between align-items-center">
+            <span><i class="fas fa-list me-2 text-muted"></i>All Available Stocks</span>
+            <div class="d-flex align-items-center gap-3">
+              <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" id="showSelectedOnly">
+                <label class="form-check-label" for="showSelectedOnly">Selected only</label>
+              </div>
+              <span class="badge bg-secondary" id="stockCountBadge">0 stocks</span>
+            </div>
+          </div>
+          <div class="chart-card-body p-0">
+            <div class="table-responsive" style="max-height: 70vh; overflow-y: auto;">
+              <table class="table table-hover stock-table mb-0">
+                <thead class="sticky-top">
+                  <tr>
+                    <th data-sort="selected">Selected <i class="fas fa-sort"></i></th>
+                    <th data-sort="stockId">Ticker <i class="fas fa-sort"></i></th>
+                    <th data-sort="stockName">Company <i class="fas fa-sort"></i></th>
+                    <th data-sort="sector">Sector <i class="fas fa-sort"></i></th>
+                    <th data-sort="predictedReturn">Predicted Return <i class="fas fa-sort"></i></th>
+                    <th>Weight</th>
+                  </tr>
+                </thead>
+                <tbody id="allStocksTable">
+                  <tr>
+                    <td colspan="6" class="text-center text-muted py-4">
+                      <i class="fas fa-database me-2"></i>Loading stock data...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab 2: REST API Guide -->
+  <div id="rest" class="tab-pane fade container-fluid">
+    <h2>REST API Guide</h2>
+    <p class="text-muted">Use these endpoints to integrate portfolio optimization into your application.</p>
+
+    <h3 class="mt-4">1. Load demo data</h3>
+    <p>Retrieve a pre-configured portfolio with sample stocks.</p>
+    <div class="code-block">
+      <button class="btn btn-outline-dark btn-sm copy-btn" onclick="copyCode(this)">
+        <i class="fas fa-copy"></i> Copy
+      </button>
+      <pre><code>curl -X GET http://localhost:8080/demo-data/SMALL</code></pre>
+    </div>
+
+    <h3 class="mt-4">2. Submit portfolio for optimization</h3>
+    <p>Start the solver to find the optimal stock selection.</p>
+    <div class="code-block">
+      <button class="btn btn-outline-dark btn-sm copy-btn" onclick="copyCode(this)">
+        <i class="fas fa-copy"></i> Copy
+      </button>
+      <pre><code>curl -X POST -H "Content-Type: application/json" \
+  -d @portfolio.json \
+  http://localhost:8080/portfolios</code></pre>
+    </div>
+
+    <h3 class="mt-4">3. Get current solution</h3>
+    <p>Poll for the latest solution while the solver is running.</p>
+    <div class="code-block">
+      <button class="btn btn-outline-dark btn-sm copy-btn" onclick="copyCode(this)">
+        <i class="fas fa-copy"></i> Copy
+      </button>
+      <pre><code>curl -X GET http://localhost:8080/portfolios/{jobId}</code></pre>
+    </div>
+
+    <h3 class="mt-4">4. Stop solving</h3>
+    <p>Terminate the solver and retrieve the best solution found.</p>
+    <div class="code-block">
+      <button class="btn btn-outline-dark btn-sm copy-btn" onclick="copyCode(this)">
+        <i class="fas fa-copy"></i> Copy
+      </button>
+      <pre><code>curl -X DELETE http://localhost:8080/portfolios/{jobId}</code></pre>
+    </div>
+
+    <h3 class="mt-4">5. Analyze constraints</h3>
+    <p>Get a detailed breakdown of constraint scores for a given solution.</p>
+    <div class="code-block">
+      <button class="btn btn-outline-dark btn-sm copy-btn" onclick="copyCode(this)">
+        <i class="fas fa-copy"></i> Copy
+      </button>
+      <pre><code>curl -X PUT -H "Content-Type: application/json" \
+  -d @portfolio.json \
+  http://localhost:8080/portfolios/analyze</code></pre>
+    </div>
+  </div>
+
+  <!-- Tab 3: OpenAPI Reference -->
+  <div id="openapi" class="tab-pane fade container-fluid">
+    <h2>OpenAPI Reference</h2>
+    <p class="text-muted mb-4">Interactive API documentation powered by Swagger UI.</p>
+    <div class="ratio ratio-1x1">
+      <iframe src="/q/swagger-ui" title="OpenAPI Documentation"></iframe>
+    </div>
+  </div>
+</div>
+
+<!-- Score Analysis Modal -->
+<div class="modal fade" id="weightModal" tabindex="-1" aria-labelledby="weightModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="weightModalTitle">Constraint Analysis</h5>
+        <span id="weightModalLabel" class="ms-2 badge bg-secondary"></span>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <table class="table table-striped" id="weightModalContent">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Constraint</th>
+              <th>Type</th>
+              <th>Weight</th>
+              <th>Matches</th>
+              <th>Score</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- Populated by JavaScript -->
+          </tbody>
+        </table>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer id="solverforge-auto-footer">
+  <!-- Filled by solverforge-webui.js -->
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="/webjars/solverforge/js/solverforge-webui.js"></script>
+<script src="app.js"></script>
+<!-- ============================================================
+     ADVANCED CONFIGURATION SCRIPT (OPTIONAL)
+     Remove this script for a simpler quickstart.
+     Also remove the "Advanced" button and panel in the HTML above.
+     ============================================================ -->
+<script src="config.js"></script>
+<!-- END ADVANCED CONFIGURATION SCRIPT -->
+</body>
+</html>

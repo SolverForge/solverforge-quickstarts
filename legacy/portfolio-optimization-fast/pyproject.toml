@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+
+[project]
+name = "portfolio_optimization"
+version = "1.0.0"
+description = "SolverForge quickstart for stock portfolio optimization"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    'solverforge-legacy == 1.24.1',
+    'fastapi == 0.111.0',
+    'pydantic == 2.7.3',
+    'uvicorn == 0.30.1',
+    'pytest == 8.2.2',
+]
+
+
+[project.scripts]
+run-app = "portfolio_optimization:main"
