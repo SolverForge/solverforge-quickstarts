@@ -1,0 +1,15 @@
+# SolverForge configuration for Employee Scheduling
+# See solverforge-config crate for all options
+
+[termination]
+seconds_spent_limit = 30
+
+[[phases]]
+type = "construction_heuristic"
+construction_heuristic_type = "first_fit"
+
+[[phases]]
+type = "local_search"
+[phases.acceptor]
+type = "late_acceptance"
+late_acceptance_size = 400

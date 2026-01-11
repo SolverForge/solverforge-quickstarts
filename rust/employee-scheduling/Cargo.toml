@@ -1,12 +1,12 @@
 [package]
 name = "employee-scheduling"
-version = "0.4.1"
+version = "0.4.12"
 edition = "2021"
 description = "Employee scheduling quickstart for SolverForge"
 publish = false
 
 [dependencies]
-solverforge = { version = "0.4.0", features = ["serde"] }
+solverforge = { path = "../../../solverforge-rs/crates/solverforge", features = ["serde"] }
 rand = "0.8"
 
 axum = "0.8"
