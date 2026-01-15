@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - dev
+      - 'release/**'
     paths:
       - 'rust/employee-scheduling/**'
       - 'legacy/employee-scheduling-fast/**'
