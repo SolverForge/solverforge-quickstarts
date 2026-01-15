@@ -1,0 +1,12 @@
+apiVersion: v2
+name: vehicle-routing-fast
+description: Vehicle Routing optimization using Timefold Solver (Python/FastAPI)
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - timefold
+  - optimization
+  - routing
+  - python
+  - fastapi
