@@ -873,7 +873,9 @@ dependencies = [
 
 [[package]]
 name = "solverforge"
-version = "0.4.0"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb513309e056520689d2e85b5b0cd41bfe683dbf8cb2e9551e8251a38fa7dbdd"
 dependencies = [
  "num-format",
  "owo-colors",
@@ -888,7 +890,9 @@ dependencies = [
 
 [[package]]
 name = "solverforge-config"
-version = "0.4.0"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd73530a3b29a90f34778f7326d812605bf2deb4c253027fffef39a587bf1880"
 dependencies = [
  "serde",
  "serde_yaml",
@@ -899,7 +903,9 @@ dependencies = [
 
 [[package]]
 name = "solverforge-core"
-version = "0.4.0"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9340b4e2e13d3cf0f2525a6b4e7fbb674819ccacb6cd6ea8777abe8baa463f3"
 dependencies = [
  "num-traits",
  "serde",
@@ -908,7 +914,9 @@ dependencies = [
 
 [[package]]
 name = "solverforge-macros"
-version = "0.4.0"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27b9c7720596cef52b919937b08eb65ec3e341010c249e7f5270e4ab4b879956"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -917,7 +925,9 @@ dependencies = [
 
 [[package]]
 name = "solverforge-scoring"
-version = "0.4.0"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "924e94cad37c0942ffa549cc92c5eb65f2d7567e31c57c32751a5222d23b2523"
 dependencies = [
  "solverforge-core",
  "thiserror",
@@ -925,7 +935,9 @@ dependencies = [
 
 [[package]]
 name = "solverforge-solver"
-version = "0.4.0"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07696c23f16d5b9f5f0eb5afbacdd2f44daf1fd1d123ba31bbdbf9e5bb8f4b63"
 dependencies = [
  "rand 0.9.2",
  "rand_chacha 0.9.0",

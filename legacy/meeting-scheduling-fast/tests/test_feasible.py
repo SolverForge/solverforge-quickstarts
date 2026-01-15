@@ -21,7 +21,7 @@ def json_to_meeting_schedule(schedule_json):
 
 
 def test_feasible():
-    demo_data_response = client.get("/demo-data")
+    demo_data_response = client.get("/demo-data/SMALL")
     assert demo_data_response.status_code == 200
 
     job_id_response = client.post("/schedules", json=demo_data_response.json())
@@ -52,7 +52,7 @@ def test_feasible():
 
 
 def test_analyze():
-    demo_data_response = client.get("/demo-data")
+    demo_data_response = client.get("/demo-data/SMALL")
     assert demo_data_response.status_code == 200
 
     job_id_response = client.post("/schedules", json=demo_data_response.json())
@@ -90,7 +90,7 @@ def test_analyze():
 
 def test_analyze_constraint_scores():
     """Test that the analyze endpoint returns proper constraint scores instead of all zeros."""
-    demo_data_response = client.get("/demo-data")
+    demo_data_response = client.get("/demo-data/SMALL")
     assert demo_data_response.status_code == 200
 
     job_id_response = client.post("/schedules", json=demo_data_response.json())
