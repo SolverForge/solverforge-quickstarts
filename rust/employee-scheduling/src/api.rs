@@ -19,6 +19,7 @@ use crate::domain::{Employee, EmployeeSchedule, Shift};
 /// Job tracking for active solves.
 struct SolveJob {
     solution: EmployeeSchedule,
+    solver_status: String,
 }
 
 /// Application state shared across handlers.
@@ -120,10 +121,12 @@ pub struct ScheduleDto {
     pub shifts: Vec<ShiftDto>,
     #[serde(default)]
     pub score: Option<String>,
+    #[serde(default, skip_deserializing)]
+    pub solver_status: Option<String>,
 }
 
 impl ScheduleDto {
-    pub fn from_schedule(schedule: &EmployeeSchedule) -> Self {
+    pub fn from_schedule(schedule: &EmployeeSchedule, solver_status: Option<String>) -> Self {
         let employees: Vec<EmployeeDto> = schedule.employees.iter().map(EmployeeDto::from).collect();
 
         let shifts: Vec<ShiftDto> = schedule
@@ -145,6 +148,7 @@ impl ScheduleDto {
             employees,
             shifts,
             score: schedule.score.map(|s| format!("{}", s)),
+            solver_status,
         }
     }
 
@@ -242,7 +246,7 @@ async fn get_demo_data(Path(id): Path<String>) -> Result<Json<ScheduleDto>, Stat
     match id.parse::<DemoData>() {
         Ok(demo) => {
             let schedule = demo_data::generate(demo);
-            Ok(Json(ScheduleDto::from_schedule(&schedule)))
+            Ok(Json(ScheduleDto::from_schedule(&schedule, None)))
         }
         Err(_) => Err(StatusCode::NOT_FOUND),
     }
@@ -262,6 +266,7 @@ async fn create_schedule(
         let mut jobs = state.jobs.write();
         jobs.insert(id.clone(), SolveJob {
             solution: schedule.clone(),
+            solver_status: "SOLVING".to_string(),
         });
     }
 
@@ -276,6 +281,11 @@ async fn create_schedule(
             if let Some(job) = jobs.get_mut(&job_id) {
                 job.solution = solution;
             }
+        }
+        // Channel closed - solver finished
+        let mut jobs = state_clone.jobs.write();
+        if let Some(job) = jobs.get_mut(&job_id) {
+            job.solver_status = "NOT_SOLVING".to_string();
         }
     });
 
@@ -300,7 +310,7 @@ async fn get_schedule(
 ) -> Result<Json<ScheduleDto>, StatusCode> {
     match state.jobs.read().get(&id) {
         Some(job) => {
-            Ok(Json(ScheduleDto::from_schedule(&job.solution)))
+            Ok(Json(ScheduleDto::from_schedule(&job.solution, Some(job.solver_status.clone()))))
         }
         None => Err(StatusCode::NOT_FOUND),
     }
