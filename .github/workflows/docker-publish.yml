@@ -5,7 +5,9 @@ on:
     branches:
       - main
       - dev
+      - 'release/**'
     paths:
+      - 'rust/employee-scheduling/**'
       - 'legacy/employee-scheduling-fast/**'
       - 'legacy/maintenance-scheduling-fast/**'
       - 'legacy/meeting-scheduling-fast/**'
@@ -24,8 +26,31 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  # Tests run on both dev and main
-  test:
+  # Rust tests
+  test-rust:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/employee-scheduling
+
+      - name: Run tests
+        working-directory: rust/employee-scheduling
+        run: cargo test --verbose
+
+      - name: Build
+        working-directory: rust/employee-scheduling
+        run: cargo build --release --verbose
+
+  # Python legacy tests
+  test-python:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -71,7 +96,7 @@ jobs:
 
   # Build and push on main and dev
   build-and-push:
-    needs: test
+    needs: [test-rust, test-python]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -80,6 +105,8 @@ jobs:
       fail-fast: false
       matrix:
         app:
+          - name: employee-scheduling
+            context: rust/employee-scheduling
           - name: employee-scheduling-fast
             context: legacy/employee-scheduling-fast
           - name: maintenance-scheduling-fast
