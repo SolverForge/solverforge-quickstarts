@@ -1,0 +1,12 @@
+apiVersion: v2
+name: maintenance-scheduling-fast
+description: Maintenance Scheduling optimization using Timefold Solver (Python/FastAPI)
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - timefold
+  - optimization
+  - scheduling
+  - python
+  - fastapi

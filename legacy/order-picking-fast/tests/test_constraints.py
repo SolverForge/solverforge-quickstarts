@@ -8,8 +8,7 @@ from order_picking.constraints import (
     define_constraints,
     required_number_of_buckets,
     minimize_order_split_by_trolley,
-    minimize_distance_from_previous_step,
-    minimize_distance_from_last_step_to_origin,
+    minimize_total_distance,
 )
 
 
@@ -160,9 +159,14 @@ class TestMinimizeOrderSplitByTrolley:
         ).penalizes_by(2000)
 
 
-class TestMinimizeDistanceFromPreviousStep:
-    def test_distance_from_trolley_start(self):
-        """Distance from trolley start location to first step."""
+class TestMinimizeTotalDistance:
+    def test_total_distance_single_step(self):
+        """Total distance for trolley with single step.
+
+        Note: In constraint verification tests, shadow variables aren't triggered,
+        so distance_from_previous is None. The constraint only calculates the return
+        distance from last step back to origin.
+        """
         trolley = Trolley(
             id="1",
             bucket_count=4,
@@ -175,28 +179,7 @@ class TestMinimizeDistanceFromPreviousStep:
 
         connect(trolley, step)
 
-        # Same shelving, same side: |8 - 5| = 3 meters
-        constraint_verifier.verify_that(minimize_distance_from_previous_step).given(
-            trolley, step
-        ).penalizes_by(3)
-
-
-class TestMinimizeDistanceFromLastStepToOrigin:
-    def test_distance_back_to_origin(self):
-        """Distance from last step back to trolley start location."""
-        trolley = Trolley(
-            id="1",
-            bucket_count=4,
-            bucket_capacity=BUCKET_CAPACITY,
-            location=LOCATION_A1_LEFT_5
-        )
-        product = create_product("p1", 10000, LOCATION_A1_LEFT_8)
-        order, items = create_order_with_items("o1", [product])
-        step = TrolleyStep(id="s1", order_item=items[0])
-
-        connect(trolley, step)
-
-        # Same shelving, same side: |8 - 5| = 3 meters
-        constraint_verifier.verify_that(minimize_distance_from_last_step_to_origin).given(
+        # Same shelving, same side: |8 - 5| = 3 meters (return distance only in tests)
+        constraint_verifier.verify_that(minimize_total_distance).given(
             trolley, step
         ).penalizes_by(3)

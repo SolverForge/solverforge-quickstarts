@@ -132,6 +132,13 @@ impl Shift {
 
 /// The employee scheduling solution.
 #[planning_solution]
+#[basic_variable_config(
+    entity_collection = "shifts",
+    variable_field = "employee_idx",
+    variable_type = "usize",
+    value_range = "employees"
+)]
+#[solverforge_constraints_path = "crate::constraints::create_fluent_constraints"]
 #[derive(Serialize, Deserialize)]
 pub struct EmployeeSchedule {
     #[problem_fact_collection]
