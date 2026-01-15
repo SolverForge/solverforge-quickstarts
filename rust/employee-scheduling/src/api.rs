@@ -7,24 +7,30 @@ use axum::{
     Json, Router,
 };
 use chrono::{NaiveDate, NaiveDateTime};
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::demo_data::{self, DemoData};
 use crate::domain::{Employee, EmployeeSchedule, Shift};
-use crate::solver::{SolverService, SolverStatus};
+
+/// Job tracking for active solves.
+struct SolveJob {
+    solution: EmployeeSchedule,
+    solver_status: String,
+}
 
 /// Application state shared across handlers.
 pub struct AppState {
-    pub solver: SolverService,
+    jobs: RwLock<HashMap<String, SolveJob>>,
 }
 
 impl AppState {
     pub fn new() -> Self {
         Self {
-            solver: SolverService::new(),
+            jobs: RwLock::new(HashMap::new()),
         }
     }
 }
@@ -115,12 +121,12 @@ pub struct ScheduleDto {
     pub shifts: Vec<ShiftDto>,
     #[serde(default)]
     pub score: Option<String>,
-    #[serde(default)]
-    pub solver_status: Option<SolverStatus>,
+    #[serde(default, skip_deserializing)]
+    pub solver_status: Option<String>,
 }
 
 impl ScheduleDto {
-    pub fn from_schedule(schedule: &EmployeeSchedule, status: Option<SolverStatus>) -> Self {
+    pub fn from_schedule(schedule: &EmployeeSchedule, solver_status: Option<String>) -> Self {
         let employees: Vec<EmployeeDto> = schedule.employees.iter().map(EmployeeDto::from).collect();
 
         let shifts: Vec<ShiftDto> = schedule
@@ -142,7 +148,7 @@ impl ScheduleDto {
             employees,
             shifts,
             score: schedule.score.map(|s| format!("{}", s)),
-            solver_status: status,
+            solver_status,
         }
     }
 
@@ -254,14 +260,47 @@ async fn create_schedule(
 ) -> String {
     let id = Uuid::new_v4().to_string();
     let schedule = dto.to_domain();
-    let job = state.solver.create_job(id.clone(), schedule);
-    state.solver.start_solving(job);
+
+    // Store initial state
+    {
+        let mut jobs = state.jobs.write();
+        jobs.insert(id.clone(), SolveJob {
+            solution: schedule.clone(),
+            solver_status: "SOLVING".to_string(),
+        });
+    }
+
+    // Start solving in background via library API
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let job_id = id.clone();
+    let state_clone = state.clone();
+
+    tokio::spawn(async move {
+        while let Some((solution, _score)) = rx.recv().await {
+            let mut jobs = state_clone.jobs.write();
+            if let Some(job) = jobs.get_mut(&job_id) {
+                job.solution = solution;
+            }
+        }
+        // Channel closed - solver finished
+        let mut jobs = state_clone.jobs.write();
+        if let Some(job) = jobs.get_mut(&job_id) {
+            job.solver_status = "NOT_SOLVING".to_string();
+        }
+    });
+
+    // Solvable trait auto-implemented by #[planning_solution] macro
+    use solverforge::Solvable;
+    rayon::spawn(move || {
+        schedule.solve(None, tx);
+    });
+
     id
 }
 
 /// GET /schedules - List all schedule IDs.
 async fn list_schedules(State(state): State<Arc<AppState>>) -> Json<Vec<String>> {
-    Json(state.solver.list_jobs())
+    Json(state.jobs.read().keys().cloned().collect())
 }
 
 /// GET /schedules/{id} - Get a schedule's current state.
@@ -269,13 +308,9 @@ async fn get_schedule(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<ScheduleDto>, StatusCode> {
-    match state.solver.get_job(&id) {
+    match state.jobs.read().get(&id) {
         Some(job) => {
-            let job_guard = job.read();
-            Ok(Json(ScheduleDto::from_schedule(
-                &job_guard.schedule,
-                Some(job_guard.status.clone()),
-            )))
+            Ok(Json(ScheduleDto::from_schedule(&job.solution, Some(job.solver_status.clone()))))
         }
         None => Err(StatusCode::NOT_FOUND),
     }
@@ -286,7 +321,6 @@ async fn get_schedule(
 #[serde(rename_all = "camelCase")]
 pub struct StatusResponse {
     pub score: Option<String>,
-    pub solver_status: SolverStatus,
 }
 
 /// GET /schedules/{id}/status - Get a schedule's status.
@@ -294,12 +328,10 @@ async fn get_schedule_status(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<StatusResponse>, StatusCode> {
-    match state.solver.get_job(&id) {
+    match state.jobs.read().get(&id) {
         Some(job) => {
-            let job_guard = job.read();
             Ok(Json(StatusResponse {
-                score: job_guard.schedule.score.map(|s| format!("{}", s)),
-                solver_status: job_guard.status.clone(),
+                score: job.solution.score.map(|s| format!("{}", s)),
             }))
         }
         None => Err(StatusCode::NOT_FOUND),
@@ -311,8 +343,7 @@ async fn stop_solving(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> StatusCode {
-    state.solver.stop_solving(&id);
-    if state.solver.remove_job(&id).is_some() {
+    if state.jobs.write().remove(&id).is_some() {
         StatusCode::NO_CONTENT
     } else {
         StatusCode::NOT_FOUND

@@ -344,4 +344,24 @@ mod tests {
             "Should have medical locations"
         );
     }
+
+    #[test]
+    fn test_empty_schedule_has_score() {
+        use crate::domain::EmployeeSchedule;
+        use solverforge::Solvable;
+        use tokio::sync::mpsc::unbounded_channel;
+
+        // Empty schedule with no shifts and no employees
+        let schedule = EmployeeSchedule::new(vec![], vec![]);
+        let (sender, mut receiver) = unbounded_channel();
+        schedule.solve(None, sender);
+
+        // Get the final solution from the channel
+        let (result, _score) = receiver.blocking_recv().expect("should receive solution");
+
+        assert!(
+            result.score.is_some(),
+            "Empty schedule should have a score after solving, got None"
+        );
+    }
 }

@@ -177,22 +177,19 @@ checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
 name = "employee-scheduling"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "axum",
  "chrono",
- "num-format",
- "owo-colors",
  "parking_lot",
  "rand 0.8.5",
+ "rayon",
  "serde",
  "serde_json",
  "solverforge",
  "tokio",
  "tower",
  "tower-http",
- "tracing",
- "tracing-subscriber",
  "uuid",
 ]
 
@@ -877,21 +874,21 @@ dependencies = [
 [[package]]
 name = "solverforge"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f428842bbe1db54e26a282a7a774b2d3b67fa01e7da20061bb2af24abd5238df"
 dependencies = [
+ "num-format",
+ "owo-colors",
  "solverforge-config",
  "solverforge-core",
  "solverforge-macros",
  "solverforge-scoring",
  "solverforge-solver",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
 name = "solverforge-config"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50563fc9cfbfafc6a17c900e7932046ead097c4200d46702f07b76b84c03aeca"
 dependencies = [
  "serde",
  "serde_yaml",
@@ -903,8 +900,6 @@ dependencies = [
 [[package]]
 name = "solverforge-core"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4efa87e539f708d3a5320290677dbf273941456f4c916816bf1c99b5f80ae1aa"
 dependencies = [
  "num-traits",
  "serde",
@@ -914,8 +909,6 @@ dependencies = [
 [[package]]
 name = "solverforge-macros"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d0291164c16e2905ac48a00e7dbd05299b284fcb494cd621462ba29342b7302"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -925,8 +918,6 @@ dependencies = [
 [[package]]
 name = "solverforge-scoring"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eec06e623899f232667b09a1b12d3eac67569ab7c1633e6ddd3f4ee48868feb6"
 dependencies = [
  "solverforge-core",
  "thiserror",
@@ -935,17 +926,17 @@ dependencies = [
 [[package]]
 name = "solverforge-solver"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9c652e5d4f2fd3c161c9f1b64486013cdd6df061b97a2efb119ae9dabc798e5"
 dependencies = [
  "rand 0.9.2",
  "rand_chacha 0.9.0",
  "rayon",
+ "serde",
  "smallvec",
  "solverforge-config",
  "solverforge-core",
  "solverforge-scoring",
  "thiserror",
+ "tokio",
  "tracing",
 ]
 
