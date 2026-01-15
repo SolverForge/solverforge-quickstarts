@@ -1,6 +1,7 @@
 from solverforge_legacy.solver.test import ConstraintVerifier
 
 from meeting_scheduling.domain import (
+    Attendance,
     Meeting,
     MeetingAssignment,
     MeetingSchedule,
@@ -105,10 +106,10 @@ def test_required_attendance_conflict_unpenalized():
     person = create_person(1)
 
     left_meeting = create_meeting(1, duration=2)
-    required_attendance1 = create_required_attendance(0, person, left_meeting)
+    required_attendance1, _ = create_required_attendance(0, person, left_meeting)
 
     right_meeting = create_meeting(2, duration=2)
-    required_attendance2 = create_required_attendance(1, person, right_meeting)
+    required_attendance2, _ = create_required_attendance(1, person, right_meeting)
 
     left_assignment = create_meeting_assignment(
         0, left_meeting, DEFAULT_TIME_GRAINS[0], DEFAULT_ROOM
@@ -127,10 +128,10 @@ def test_required_attendance_conflict_penalized():
     person = create_person(1)
 
     left_meeting = create_meeting(1, duration=2)
-    required_attendance1 = create_required_attendance(0, person, left_meeting)
+    required_attendance1, _ = create_required_attendance(0, person, left_meeting)
 
     right_meeting = create_meeting(2, duration=2)
-    required_attendance2 = create_required_attendance(1, person, right_meeting)
+    required_attendance2, _ = create_required_attendance(1, person, right_meeting)
 
     left_assignment = create_meeting_assignment(
         0, left_meeting, DEFAULT_TIME_GRAINS[0], DEFAULT_ROOM
@@ -225,13 +226,13 @@ def test_multiple_constraint_violations():
     person = create_person(1)
 
     left_meeting = create_meeting(1)
-    required_attendance1 = create_required_attendance(0, person, left_meeting)
+    required_attendance1, _ = create_required_attendance(0, person, left_meeting)
     left_assignment = create_meeting_assignment(
         0, left_meeting, DEFAULT_TIME_GRAINS[0], DEFAULT_ROOM
     )
 
     right_meeting = create_meeting(2)
-    required_attendance2 = create_required_attendance(1, person, right_meeting)
+    required_attendance2, _ = create_required_attendance(1, person, right_meeting)
     right_assignment = create_meeting_assignment(
         1, right_meeting, DEFAULT_TIME_GRAINS[2], DEFAULT_ROOM
     )
@@ -265,17 +266,21 @@ def create_person(id):
 
 
 def create_required_attendance(id, person, meeting):
-    """Helper to create and link required attendance."""
-    attendance = RequiredAttendance(id=str(id), person=person, meeting_id=meeting.id)
-    meeting.required_attendances = [attendance]
-    return attendance
+    """Helper to create and link required attendance, also creates Attendance object."""
+    required = RequiredAttendance(id=str(id), person=person, meeting_id=meeting.id)
+    meeting.required_attendances = [required]
+    # Also create an Attendance object for the room_stability constraint
+    attendance = Attendance(id=str(id), person=person, meeting_id=meeting.id)
+    return required, attendance
 
 
 def create_preferred_attendance(id, person, meeting):
-    """Helper to create and link preferred attendance."""
-    attendance = PreferredAttendance(id=str(id), person=person, meeting_id=meeting.id)
-    meeting.preferred_attendances = [attendance]
-    return attendance
+    """Helper to create and link preferred attendance, also creates Attendance object."""
+    preferred = PreferredAttendance(id=str(id), person=person, meeting_id=meeting.id)
+    meeting.preferred_attendances = [preferred]
+    # Also create an Attendance object for the room_stability constraint
+    attendance = Attendance(id=str(id), person=person, meeting_id=meeting.id)
+    return preferred, attendance
 
 
 # ========================================
@@ -289,12 +294,12 @@ def test_required_and_preferred_attendance_conflict_unpenalized():
 
     # Meeting 1: grain 0-3 (duration=4), person required
     meeting1 = create_meeting(1, duration=4)
-    attendance1 = create_required_attendance(0, person, meeting1)
+    attendance1, _ = create_required_attendance(0, person, meeting1)
     assignment1 = create_meeting_assignment(0, meeting1, DEFAULT_TIME_GRAINS[0], DEFAULT_ROOM)
 
     # Meeting 2: grain 4-7 (duration=4), person preferred
     meeting2 = create_meeting(2, duration=4)
-    attendance2 = create_preferred_attendance(1, person, meeting2)
+    attendance2, _ = create_preferred_attendance(1, person, meeting2)
     assignment2 = create_meeting_assignment(1, meeting2, DEFAULT_TIME_GRAINS[4], ROOM_A)
 
     constraint_verifier.verify_that(required_and_preferred_attendance_conflict).given(
@@ -308,12 +313,12 @@ def test_required_and_preferred_attendance_conflict_penalized():
 
     # Meeting 1: grain 0-3 (duration=4), person required
     meeting1 = create_meeting(1, duration=4)
-    attendance1 = create_required_attendance(0, person, meeting1)
+    attendance1, _ = create_required_attendance(0, person, meeting1)
     assignment1 = create_meeting_assignment(0, meeting1, DEFAULT_TIME_GRAINS[0], DEFAULT_ROOM)
 
     # Meeting 2: grain 2-5 (duration=4), person preferred, overlaps grains 2-3 (2 grains)
     meeting2 = create_meeting(2, duration=4)
-    attendance2 = create_preferred_attendance(1, person, meeting2)
+    attendance2, _ = create_preferred_attendance(1, person, meeting2)
     assignment2 = create_meeting_assignment(1, meeting2, DEFAULT_TIME_GRAINS[2], ROOM_A)
 
     # Overlap: grains 2-3 = 2 grains
@@ -333,12 +338,12 @@ def test_preferred_attendance_conflict_unpenalized():
 
     # Meeting 1: grain 0-3 (duration=4), person preferred
     meeting1 = create_meeting(1, duration=4)
-    attendance1 = create_preferred_attendance(0, person, meeting1)
+    attendance1, _ = create_preferred_attendance(0, person, meeting1)
     assignment1 = create_meeting_assignment(0, meeting1, DEFAULT_TIME_GRAINS[0], DEFAULT_ROOM)
 
     # Meeting 2: grain 4-7 (duration=4), person preferred
     meeting2 = create_meeting(2, duration=4)
-    attendance2 = create_preferred_attendance(1, person, meeting2)
+    attendance2, _ = create_preferred_attendance(1, person, meeting2)
     assignment2 = create_meeting_assignment(1, meeting2, DEFAULT_TIME_GRAINS[4], ROOM_A)
 
     constraint_verifier.verify_that(preferred_attendance_conflict).given(
@@ -352,12 +357,12 @@ def test_preferred_attendance_conflict_penalized():
 
     # Meeting 1: grain 0-3 (duration=4), person preferred
     meeting1 = create_meeting(1, duration=4)
-    attendance1 = create_preferred_attendance(0, person, meeting1)
+    attendance1, _ = create_preferred_attendance(0, person, meeting1)
     assignment1 = create_meeting_assignment(0, meeting1, DEFAULT_TIME_GRAINS[0], DEFAULT_ROOM)
 
     # Meeting 2: grain 1-4 (duration=4), person preferred, overlaps grains 1-3 (3 grains)
     meeting2 = create_meeting(2, duration=4)
-    attendance2 = create_preferred_attendance(1, person, meeting2)
+    attendance2, _ = create_preferred_attendance(1, person, meeting2)
     assignment2 = create_meeting_assignment(1, meeting2, DEFAULT_TIME_GRAINS[1], ROOM_A)
 
     # Overlap: grains 1-3 = 3 grains
@@ -380,12 +385,12 @@ def test_room_stability_same_room_no_penalty():
 
     # Meeting 1: time grain 0-1 (duration=2) in ROOM_A
     meeting1 = create_meeting(1, duration=2)
-    attendance1 = create_required_attendance(0, person, meeting1)
+    _, attendance1 = create_required_attendance(0, person, meeting1)
     assignment1 = create_meeting_assignment(0, meeting1, DEFAULT_TIME_GRAINS[0], ROOM_A)
 
     # Meeting 2: time grain 3-4 (duration=2) in ROOM_A (same room, gap of 1)
     meeting2 = create_meeting(2, duration=2)
-    attendance2 = create_required_attendance(1, person, meeting2)
+    _, attendance2 = create_required_attendance(1, person, meeting2)
     assignment2 = create_meeting_assignment(1, meeting2, DEFAULT_TIME_GRAINS[3], ROOM_A)
 
     # Same room should not penalize
@@ -406,13 +411,13 @@ def test_room_stability_different_room_with_required_attendance():
     left_grain_index = 0
     left_duration = 2
     meeting1 = create_meeting(1, duration=left_duration)
-    attendance1 = create_required_attendance(0, person, meeting1)
+    _, attendance1 = create_required_attendance(0, person, meeting1)
     assignment1 = create_meeting_assignment(0, meeting1, DEFAULT_TIME_GRAINS[left_grain_index], ROOM_A)
 
     # Meeting 2: time grain 3-4 (duration=2) in ROOM_B (different room)
     right_grain_index = 3
     meeting2 = create_meeting(2, duration=2)
-    attendance2 = create_required_attendance(1, person, meeting2)
+    _, attendance2 = create_required_attendance(1, person, meeting2)
     assignment2 = create_meeting_assignment(1, meeting2, DEFAULT_TIME_GRAINS[right_grain_index], ROOM_B)
 
     # Weighted penalty: 3 - gap, where gap = right_grain - left_duration - left_grain
@@ -436,13 +441,13 @@ def test_room_stability_different_room_with_preferred_attendance():
     left_grain_index = 0
     left_duration = 2
     meeting1 = create_meeting(1, duration=left_duration)
-    attendance1 = create_preferred_attendance(0, person, meeting1)
+    _, attendance1 = create_preferred_attendance(0, person, meeting1)
     assignment1 = create_meeting_assignment(0, meeting1, DEFAULT_TIME_GRAINS[left_grain_index], ROOM_A)
 
     # Meeting 2: time grain 3-4 (duration=2) in ROOM_B (different room)
     right_grain_index = 3
     meeting2 = create_meeting(2, duration=2)
-    attendance2 = create_preferred_attendance(1, person, meeting2)
+    _, attendance2 = create_preferred_attendance(1, person, meeting2)
     assignment2 = create_meeting_assignment(1, meeting2, DEFAULT_TIME_GRAINS[right_grain_index], ROOM_B)
 
     # Weighted penalty: 3 - gap
@@ -465,13 +470,13 @@ def test_room_stability_mixed_attendance_types():
     left_grain_index = 0
     left_duration = 2
     meeting1 = create_meeting(1, duration=left_duration)
-    required_attendance = create_required_attendance(0, person, meeting1)
+    _, attendance1 = create_required_attendance(0, person, meeting1)
     assignment1 = create_meeting_assignment(0, meeting1, DEFAULT_TIME_GRAINS[left_grain_index], ROOM_A)
 
     # Meeting 2 with preferred attendance
     right_grain_index = 3
     meeting2 = create_meeting(2, duration=2)
-    preferred_attendance = create_preferred_attendance(1, person, meeting2)
+    _, attendance2 = create_preferred_attendance(1, person, meeting2)
     assignment2 = create_meeting_assignment(1, meeting2, DEFAULT_TIME_GRAINS[right_grain_index], ROOM_B)
 
     # Weighted penalty: 3 - gap
@@ -479,7 +484,7 @@ def test_room_stability_mixed_attendance_types():
     expected_penalty = 3 - gap
 
     constraint_verifier.verify_that(room_stability).given(
-        required_attendance, preferred_attendance, assignment1, assignment2
+        attendance1, attendance2, assignment1, assignment2
     ).penalizes_by(expected_penalty)
 
 
@@ -492,13 +497,13 @@ def test_room_stability_far_apart_meetings_no_penalty():
 
     # Meeting 1: time grain 0-1 (duration=2) in ROOM_A
     meeting1 = create_meeting(1, duration=2)
-    attendance1 = create_required_attendance(0, person, meeting1)
+    _, attendance1 = create_required_attendance(0, person, meeting1)
     assignment1 = create_meeting_assignment(0, meeting1, DEFAULT_TIME_GRAINS[0], ROOM_A)
 
     # Meeting 2: time grain 6-7 (duration=2) in ROOM_B
     # gap = grain_index(6) - duration_in_grains(2) - grain_index(0) = 6 - 2 - 0 = 4 > 2
     meeting2 = create_meeting(2, duration=2)
-    attendance2 = create_required_attendance(1, person, meeting2)
+    _, attendance2 = create_required_attendance(1, person, meeting2)
     assignment2 = create_meeting_assignment(1, meeting2, DEFAULT_TIME_GRAINS[6], ROOM_B)
 
     # Far apart meetings should not penalize even with room change
@@ -517,12 +522,12 @@ def test_room_stability_different_people_no_penalty():
 
     # Person 1's meeting in ROOM_A
     meeting1 = create_meeting(1, duration=2)
-    attendance1 = create_required_attendance(0, person1, meeting1)
+    _, attendance1 = create_required_attendance(0, person1, meeting1)
     assignment1 = create_meeting_assignment(0, meeting1, DEFAULT_TIME_GRAINS[0], ROOM_A)
 
     # Person 2's meeting in ROOM_B (different person, should not affect stability)
     meeting2 = create_meeting(2, duration=2)
-    attendance2 = create_required_attendance(1, person2, meeting2)
+    _, attendance2 = create_required_attendance(1, person2, meeting2)
     assignment2 = create_meeting_assignment(1, meeting2, DEFAULT_TIME_GRAINS[3], ROOM_B)
 
     # Different people should not trigger room stability penalty
@@ -542,13 +547,13 @@ def test_room_stability_back_to_back_highest_penalty():
     left_grain_index = 0
     left_duration = 2
     meeting1 = create_meeting(1, duration=left_duration)
-    attendance1 = create_required_attendance(0, person, meeting1)
+    _, attendance1 = create_required_attendance(0, person, meeting1)
     assignment1 = create_meeting_assignment(0, meeting1, DEFAULT_TIME_GRAINS[left_grain_index], ROOM_A)
 
     # Meeting 2: grain 2-3 (immediately after) in ROOM_B
     right_grain_index = 2  # Starts right after meeting1 ends
     meeting2 = create_meeting(2, duration=2)
-    attendance2 = create_required_attendance(1, person, meeting2)
+    _, attendance2 = create_required_attendance(1, person, meeting2)
     assignment2 = create_meeting_assignment(1, meeting2, DEFAULT_TIME_GRAINS[right_grain_index], ROOM_B)
 
     # gap = 2 - 2 - 0 = 0, penalty = 3 - 0 = 3
