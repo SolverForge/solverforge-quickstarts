@@ -6,6 +6,8 @@ on:
       - main
       - dev
       - 'release/**'
+    tags:
+      - '*'
     paths:
       - 'rust/employee-scheduling/**'
       - 'legacy/employee-scheduling-fast/**'
@@ -94,9 +96,10 @@ jobs:
         working-directory: ${{ matrix.app.path }}
         run: pytest -v
 
-  # Build and push on main and dev
+  # Build and push (only on tags and main/release/*)
   build-and-push:
     needs: [test-rust, test-python]
+    if: github.ref_type == 'tag' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -137,12 +140,21 @@ jobs:
             echo "build=true" >> $GITHUB_OUTPUT
           fi
 
+      - name: Determine if push is allowed
+        id: push-check
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "push=true" >> $GITHUB_OUTPUT
+          else
+            echo "push=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Set up Docker Buildx
         if: steps.check.outputs.build == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Container Registry
-        if: steps.check.outputs.build == 'true'
+        if: steps.check.outputs.build == 'true' && steps.push-check.outputs.push == 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -156,16 +168,17 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.app.name }}
           tags: |
+            type=ref,event=tag
             type=ref,event=branch
             type=sha,prefix=
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
 
       - name: Build and push Docker image
         if: steps.check.outputs.build == 'true'
         uses: docker/build-push-action@v5
         with:
           context: ${{ matrix.app.context }}
-          push: true
+          push: ${{ steps.push-check.outputs.push }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
