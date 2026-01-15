@@ -35,5 +35,6 @@ async fn main() {
     let addr = SocketAddr::from(([0, 0, 0, 0], 7860));
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    println!("Server running at http://localhost:{}", addr.port());
     axum::serve(listener, app).await.unwrap();
 }

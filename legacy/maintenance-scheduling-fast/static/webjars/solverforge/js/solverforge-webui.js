@@ -1,12 +1,32 @@
 function replaceSolverForgeAutoHeaderFooter() {
   const solverforgeHeader = $("header#solverforge-auto-header");
   if (solverforgeHeader != null) {
+<<<<<<<< HEAD:rust/vehicle-routing/static/webjars/solverforge/js/solverforge-webui.js
+    solverforgeHeader.addClass("bg-black")
+|||||||| f6dff88:legacy/tournament-scheduling/static/webjars/timefold/js/timefold-webui.js
+function replaceTimefoldAutoHeaderFooter() {
+  const timefoldHeader = $("header#timefold-auto-header");
+  if (timefoldHeader != null) {
+    timefoldHeader.addClass("bg-black")
+    timefoldHeader.append(
+========
     solverforgeHeader.css("background-color", "#ffffff");
+>>>>>>>> dev:legacy/maintenance-scheduling-fast/static/webjars/solverforge/js/solverforge-webui.js
     solverforgeHeader.append(
       $(`<div class="container-fluid">
+<<<<<<<< HEAD:rust/vehicle-routing/static/webjars/solverforge/js/solverforge-webui.js
+        <nav class="navbar sticky-top navbar-expand-lg navbar-dark shadow mb-3">
+          <a class="navbar-brand" href="https://www.solverforge.org">
+            <img src="/solverforge/img/solverforge-horizontal-white.svg" alt="SolverForge logo" width="200">
+|||||||| f6dff88:legacy/tournament-scheduling/static/webjars/timefold/js/timefold-webui.js
+        <nav class="navbar sticky-top navbar-expand-lg navbar-dark shadow mb-3">
+          <a class="navbar-brand" href="https://timefold.ai">
+            <img src="/timefold/img/timefold-logo-horizontal-negative.svg" alt="Timefold logo" width="200">
+========
         <nav class="navbar sticky-top navbar-expand-lg shadow-sm mb-3" style="background-color: #ffffff;">
           <a class="navbar-brand" href="https://www.solverforge.org">
             <img src="/webjars/solverforge/img/solverforge-horizontal.svg" alt="SolverForge logo" width="400">
+>>>>>>>> dev:legacy/maintenance-scheduling-fast/static/webjars/solverforge/js/solverforge-webui.js
           </a>
         </nav>
       </div>`));
@@ -14,7 +34,16 @@ function replaceSolverForgeAutoHeaderFooter() {
   const solverforgeFooter = $("footer#solverforge-auto-footer");
   if (solverforgeFooter != null) {
     solverforgeFooter.append(
+<<<<<<<< HEAD:rust/vehicle-routing/static/webjars/solverforge/js/solverforge-webui.js
+      $(`<footer class="bg-black text-white-50">
+|||||||| f6dff88:legacy/tournament-scheduling/static/webjars/timefold/js/timefold-webui.js
+  const timefoldFooter = $("footer#timefold-auto-footer");
+  if (timefoldFooter != null) {
+    timefoldFooter.append(
+      $(`<footer class="bg-black text-white-50">
+========
       $(`<footer class="bg-light text-muted">
+>>>>>>>> dev:legacy/maintenance-scheduling-fast/static/webjars/solverforge/js/solverforge-webui.js
            <div class="container">
              <div class="hstack gap-3 p-4">
                <div class="ms-auto"><a class="text-white" href="https://www.solverforge.org">SolverForge</a></div>
