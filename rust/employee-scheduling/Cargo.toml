@@ -6,7 +6,7 @@ description = "Employee scheduling quickstart for SolverForge"
 publish = false
 
 [dependencies]
-solverforge = { path = "../../../solverforge-rs/crates/solverforge", features = ["serde", "console", "verbose-logging"] }
+solverforge = { version = "0.5.0", features = ["serde", "console", "verbose-logging"] }
 rayon = "1"
 rand = "0.8"
 
