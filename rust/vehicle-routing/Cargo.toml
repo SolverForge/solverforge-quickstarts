@@ -28,3 +28,4 @@ utoipa = { version = "5", features = ["axum_extras"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
 async-stream = "0.3"
 tokio-stream = "0.1"
+futures = "0.3"
