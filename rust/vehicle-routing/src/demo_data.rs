@@ -208,9 +208,10 @@ pub fn generate(demo: DemoData) -> VehicleRoutePlan {
         .collect();
 
     // Build visits
-    let visits: Vec<Visit> = (0..config.visit_count)
+    let selected_visit_indices: Vec<usize> = visit_indices.into_iter().take(config.visit_count).collect();
+    let visits: Vec<Visit> = (0..selected_visit_indices.len())
         .map(|i| {
-            let visit_idx = visit_indices[i];
+            let visit_idx = selected_visit_indices[i];
             let (name, _, _, ctype) = visit_locs[visit_idx];
             let (min_demand, max_demand) = ctype.demand_range();
             let (min_service, max_service) = ctype.service_minutes_range();
