@@ -1,12 +1,13 @@
 [package]
 name = "vehicle-routing"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2021"
 description = "Vehicle routing quickstart for SolverForge"
 publish = false
 
 [dependencies]
-solverforge = { version = "0.4.3", features = ["serde"] }
+solverforge = { version = "0.5.0", features = ["serde", "console"] }
+solverforge-maps = { path = "../../../solverforge-maps" }
 rand = "0.8"
 
 axum = "0.8"
@@ -24,8 +25,5 @@ num-format = "0.4.4"
 chrono = { version = "0.4", features = ["serde"] }
 utoipa = { version = "5", features = ["axum_extras"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
-petgraph = "0.6"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-ordered-float = "4"
 async-stream = "0.3"
 tokio-stream = "0.1"
