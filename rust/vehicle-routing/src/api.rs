@@ -10,10 +10,11 @@ use axum::{
 use futures::stream::Stream;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use solverforge_maps::{encode_polyline, BoundingBox, RoadNetwork};
+use solverforge_maps::{BoundingBox, RoadNetwork, RoutingProgress};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::demo_data::{self, DemoData};
@@ -23,7 +24,6 @@ use crate::dto::*;
 struct SolveJob {
     solution: VehicleRoutePlan,
     solver_status: String,
-    geometries: HashMap<(usize, usize), String>,
 }
 
 pub struct AppState {
@@ -100,8 +100,21 @@ async fn get_demo_data(
                     plan.north_east_corner.1,
                 );
 
-                if let Ok(network) = RoadNetwork::load_or_fetch(&bbox).await {
-                    plan.travel_times = network.compute_matrix(&plan.coordinates);
+                // Use unified API with a progress channel that drains buffered messages
+                let (tx, mut rx) = mpsc::channel::<RoutingProgress>(100);
+
+                // Spawn a task to consume progress messages (non-streaming, so we just drain)
+                tokio::spawn(async move {
+                    while rx.recv().await.is_some() {
+                        // Discard progress messages in non-streaming mode
+                    }
+                });
+
+                if let Ok(result) =
+                    RoadNetwork::load_and_compute(&bbox, &plan.coordinates, tx).await
+                {
+                    plan.travel_times = result.travel_times;
+                    plan.geometries = result.geometries;
                 }
             }
 
@@ -125,7 +138,6 @@ struct SseProgress {
 struct SseComplete {
     event: &'static str,
     solution: VehicleRoutePlanDto,
-    geometries: HashMap<String, Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -160,13 +172,10 @@ async fn get_demo_data_stream(
             yield Ok(Event::default().data(serde_json::to_string(&progress).unwrap()));
 
             let dto = VehicleRoutePlanDto::from_plan(&plan, None);
-            let complete = SseComplete { event: "complete", solution: dto, geometries: HashMap::new() };
+            let complete = SseComplete { event: "complete", solution: dto };
             yield Ok(Event::default().data(serde_json::to_string(&complete).unwrap()));
         } else {
-            // Real roads path
-            let progress = SseProgress { event: "progress", phase: "network", message: "Loading road network...", percent: 10, detail: None };
-            yield Ok(Event::default().data(serde_json::to_string(&progress).unwrap()));
-
+            // Real roads path - use unified API with progress streaming
             let bbox = BoundingBox::new(
                 plan.south_west_corner.0,
                 plan.south_west_corner.1,
@@ -174,34 +183,47 @@ async fn get_demo_data_stream(
                 plan.north_east_corner.1,
             );
 
-            match RoadNetwork::load_or_fetch(&bbox).await {
-                Ok(network) => {
-                    let progress = SseProgress { event: "progress", phase: "routes", message: "Computing travel times...", percent: 50, detail: None };
-                    yield Ok(Event::default().data(serde_json::to_string(&progress).unwrap()));
+            // Create progress channel
+            let (tx, mut rx) = mpsc::channel::<RoutingProgress>(100);
 
-                    plan.travel_times = network.compute_matrix(&plan.coordinates);
+            // Spawn the computation task
+            let coordinates = plan.coordinates.clone();
+            let compute_handle = tokio::spawn(async move {
+                RoadNetwork::load_and_compute(&bbox, &coordinates, tx).await
+            });
 
-                    let progress = SseProgress { event: "progress", phase: "routes", message: "Computing route geometries...", percent: 75, detail: None };
-                    yield Ok(Event::default().data(serde_json::to_string(&progress).unwrap()));
+            // Stream progress events as they arrive
+            while let Some(progress) = rx.recv().await {
+                let (phase, message) = progress_to_phase_message(&progress);
+                let sse_progress = SseProgress {
+                    event: "progress",
+                    phase,
+                    message,
+                    percent: progress.percent(),
+                    detail: progress_detail(&progress),
+                };
+                yield Ok(Event::default().data(serde_json::to_string(&sse_progress).unwrap()));
+            }
 
-                    let raw_geometries = network.compute_all_geometries(&plan.coordinates);
-                    let encoded: HashMap<(usize, usize), String> = raw_geometries
-                        .into_iter()
-                        .map(|(k, coords)| (k, encode_polyline(&coords)))
-                        .collect();
-
-                    // Convert geometries to frontend format (vehicle_id -> [polylines])
-                    let geometries = build_vehicle_geometries(&plan, &encoded);
+            // Get final result
+            match compute_handle.await {
+                Ok(Ok(result)) => {
+                    plan.travel_times = result.travel_times;
+                    plan.geometries = result.geometries;
 
                     let progress = SseProgress { event: "progress", phase: "complete", message: "Ready!", percent: 100, detail: None };
                     yield Ok(Event::default().data(serde_json::to_string(&progress).unwrap()));
 
                     let dto = VehicleRoutePlanDto::from_plan(&plan, None);
-                    let complete = SseComplete { event: "complete", solution: dto, geometries };
+                    let complete = SseComplete { event: "complete", solution: dto };
                     yield Ok(Event::default().data(serde_json::to_string(&complete).unwrap()));
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     let err = SseError { event: "error", message: format!("Failed to load road network: {}", e) };
+                    yield Ok(Event::default().data(serde_json::to_string(&err).unwrap()));
+                }
+                Err(e) => {
+                    let err = SseError { event: "error", message: format!("Task panicked: {}", e) };
                     yield Ok(Event::default().data(serde_json::to_string(&err).unwrap()));
                 }
             }
@@ -211,40 +233,37 @@ async fn get_demo_data_stream(
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
-fn build_vehicle_geometries(
-    plan: &VehicleRoutePlan,
-    encoded: &HashMap<(usize, usize), String>,
-) -> HashMap<String, Vec<String>> {
-    let mut result: HashMap<String, Vec<String>> = HashMap::new();
-
-    for vehicle in &plan.vehicles {
-        let vehicle_visits: Vec<_> = plan
-            .visits
-            .iter()
-            .filter(|v| v.vehicle_idx == Some(vehicle.index))
-            .collect();
-
-        let mut polylines = Vec::new();
-        let mut prev_idx = vehicle.home_location_idx;
-
-        for visit in &vehicle_visits {
-            if let Some(polyline) = encoded.get(&(prev_idx, visit.location_idx)) {
-                polylines.push(polyline.clone());
-            }
-            prev_idx = visit.location_idx;
-        }
-
-        // Return to depot
-        if !vehicle_visits.is_empty() {
-            if let Some(polyline) = encoded.get(&(prev_idx, vehicle.home_location_idx)) {
-                polylines.push(polyline.clone());
-            }
-        }
-
-        result.insert(vehicle.id.clone(), polylines);
+/// Converts RoutingProgress to (phase, message) for SSE.
+fn progress_to_phase_message(progress: &RoutingProgress) -> (&'static str, &'static str) {
+    match progress {
+        RoutingProgress::CheckingCache { .. } => ("cache", "Checking cache..."),
+        RoutingProgress::DownloadingNetwork { .. } => ("network", "Downloading road network..."),
+        RoutingProgress::ParsingOsm { .. } => ("parsing", "Parsing OSM data..."),
+        RoutingProgress::BuildingGraph { .. } => ("building", "Building routing graph..."),
+        RoutingProgress::ComputingMatrix { .. } => ("matrix", "Computing travel times..."),
+        RoutingProgress::ComputingGeometries { .. } => ("geometry", "Computing route geometries..."),
+        RoutingProgress::EncodingGeometries { .. } => ("encoding", "Encoding geometries..."),
+        RoutingProgress::Complete => ("complete", "Ready!"),
     }
+}
 
-    result
+/// Extracts detail string from RoutingProgress for SSE.
+fn progress_detail(progress: &RoutingProgress) -> Option<String> {
+    match progress {
+        RoutingProgress::DownloadingNetwork { bytes, .. } if *bytes > 0 => {
+            Some(format!("{} KB downloaded", bytes / 1024))
+        }
+        RoutingProgress::ParsingOsm { nodes, edges, .. } => {
+            Some(format!("{} nodes, {} edges", nodes, edges))
+        }
+        RoutingProgress::ComputingMatrix { row, total, .. } => {
+            Some(format!("Row {}/{}", row, total))
+        }
+        RoutingProgress::ComputingGeometries { pair, total, .. } => {
+            Some(format!("Pair {}/{}", pair, total))
+        }
+        _ => None,
+    }
 }
 
 async fn create_route_plan(
@@ -255,8 +274,8 @@ async fn create_route_plan(
     let id = Uuid::new_v4().to_string();
     let mut plan = dto.to_domain();
 
-    // Load road network and compute matrix/geometries if real_roads routing requested
-    let geometries = if query.routing.as_deref() == Some("real_roads") {
+    // Load road network and compute matrix if real_roads routing requested
+    if query.routing.as_deref() == Some("real_roads") {
         let bbox = BoundingBox::new(
             plan.south_west_corner.0,
             plan.south_west_corner.1,
@@ -264,21 +283,21 @@ async fn create_route_plan(
             plan.north_east_corner.1,
         );
 
-        if let Ok(network) = RoadNetwork::load_or_fetch(&bbox).await {
-            plan.travel_times = network.compute_matrix(&plan.coordinates);
+        // Use unified API with a progress channel that drains buffered messages
+        let (tx, mut rx) = mpsc::channel::<RoutingProgress>(100);
 
-            // Compute and encode geometries
-            let raw_geometries = network.compute_all_geometries(&plan.coordinates);
-            raw_geometries
-                .into_iter()
-                .map(|(k, coords)| (k, encode_polyline(&coords)))
-                .collect()
-        } else {
-            HashMap::new()
+        // Spawn a task to consume progress messages (non-streaming, so we just drain)
+        tokio::spawn(async move {
+            while rx.recv().await.is_some() {
+                // Discard progress messages in non-streaming mode
+            }
+        });
+
+        if let Ok(result) = RoadNetwork::load_and_compute(&bbox, &plan.coordinates, tx).await {
+            plan.travel_times = result.travel_times;
+            plan.geometries = result.geometries;
         }
-    } else {
-        HashMap::new()
-    };
+    }
 
     {
         let mut jobs = state.jobs.write();
@@ -287,7 +306,6 @@ async fn create_route_plan(
             SolveJob {
                 solution: plan.clone(),
                 solver_status: "SOLVING".to_string(),
-                geometries,
             },
         );
     }
@@ -346,81 +364,6 @@ async fn get_route_plan_status(
     }
 }
 
-async fn get_route_geometry(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Result<Json<GeometryResponse>, StatusCode> {
-    match state.jobs.read().get(&id) {
-        Some(job) => {
-            let solution = &job.solution;
-
-            // Build route segments for each vehicle
-            let segments: Vec<RouteSegmentDto> = solution
-                .vehicles
-                .iter()
-                .map(|vehicle| {
-                    // Get visits assigned to this vehicle
-                    let vehicle_visits: Vec<_> = solution
-                        .visits
-                        .iter()
-                        .filter(|v| v.vehicle_idx == Some(vehicle.index))
-                        .collect();
-
-                    // Build route coordinates
-                    let mut route_coords: Vec<(f64, f64)> = Vec::new();
-
-                    // Start from depot
-                    if let Some(home_coords) =
-                        solution.get_coordinates(vehicle.home_location_idx)
-                    {
-                        route_coords.push(home_coords);
-                    }
-
-                    // Add visit locations
-                    let mut prev_loc_idx = vehicle.home_location_idx;
-                    for visit in &vehicle_visits {
-                        // If we have precomputed geometry, use it
-                        if let Some(polyline) =
-                            job.geometries.get(&(prev_loc_idx, visit.location_idx))
-                        {
-                            let decoded = solverforge_maps::decode_polyline(polyline);
-                            // Skip first point (duplicate of previous end)
-                            route_coords.extend(decoded.into_iter().skip(1));
-                        } else if let Some(coords) = solution.get_coordinates(visit.location_idx) {
-                            route_coords.push(coords);
-                        }
-                        prev_loc_idx = visit.location_idx;
-                    }
-
-                    // Return to depot
-                    if !vehicle_visits.is_empty() {
-                        if let Some(polyline) =
-                            job.geometries.get(&(prev_loc_idx, vehicle.home_location_idx))
-                        {
-                            let decoded = solverforge_maps::decode_polyline(polyline);
-                            route_coords.extend(decoded.into_iter().skip(1));
-                        } else if let Some(home_coords) =
-                            solution.get_coordinates(vehicle.home_location_idx)
-                        {
-                            route_coords.push(home_coords);
-                        }
-                    }
-
-                    RouteSegmentDto {
-                        vehicle_id: vehicle.id.clone(),
-                        vehicle_name: vehicle.name.clone(),
-                        polyline: encode_polyline(&route_coords),
-                        point_count: route_coords.len(),
-                    }
-                })
-                .collect();
-
-            Ok(Json(GeometryResponse { segments }))
-        }
-        None => Err(StatusCode::NOT_FOUND),
-    }
-}
-
 async fn stop_solving(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -430,6 +373,41 @@ async fn stop_solving(
     } else {
         StatusCode::NOT_FOUND
     }
+}
+
+async fn get_route_geometry(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<GeometryResponse>, StatusCode> {
+    let jobs = state.jobs.read();
+    let job = jobs.get(&id).ok_or(StatusCode::NOT_FOUND)?;
+    let plan = &job.solution;
+
+    let mut segments = Vec::new();
+    for (v_idx, vehicle) in plan.vehicles.iter().enumerate() {
+        let mut prev_loc = vehicle.home_location_idx;
+        for &visit_idx in &vehicle.visits {
+            let visit_loc = plan.visits[visit_idx].location_idx;
+            if let Some(polyline) = plan.geometries.get(&(prev_loc, visit_loc)) {
+                segments.push(GeometrySegment {
+                    vehicle_idx: v_idx,
+                    polyline: polyline.clone(),
+                });
+            }
+            prev_loc = visit_loc;
+        }
+        // Return to home
+        if !vehicle.visits.is_empty() {
+            if let Some(polyline) = plan.geometries.get(&(prev_loc, vehicle.home_location_idx)) {
+                segments.push(GeometrySegment {
+                    vehicle_idx: v_idx,
+                    polyline: polyline.clone(),
+                });
+            }
+        }
+    }
+
+    Ok(Json(GeometryResponse { segments }))
 }
 
 async fn analyze_route_plan(Json(dto): Json<VehicleRoutePlanDto>) -> Json<AnalyzeResponse> {

@@ -1,10 +1,21 @@
-//! Domain model for Vehicle Routing Problem.
+//! Domain model for Vehicle Routing Problem using list variables.
+//!
+//! Matches the Python legacy implementation exactly:
+//! - Vehicle has `visits: Vec<Visit>` as planning list variable
+//! - Visit has shadow variables for vehicle, previous_visit, next_visit, arrival_time
 
-use chrono::NaiveDateTime;
+use std::collections::HashMap;
+
+use chrono::{NaiveDateTime, TimeDelta};
 use serde::{Deserialize, Serialize};
 use solverforge::prelude::*;
 
 /// A customer visit that needs to be serviced.
+///
+/// This is a planning entity with shadow variables that track:
+/// - Which vehicle it's assigned to (inverse relation)
+/// - Previous/next visit in the route (element shadows)
+/// - Computed arrival time (cascading update)
 #[planning_entity]
 #[derive(Serialize, Deserialize)]
 pub struct Visit {
@@ -19,9 +30,26 @@ pub struct Visit {
     pub max_end_time: NaiveDateTime,
     #[serde(rename = "serviceDuration")]
     pub service_duration_seconds: i64,
-    #[planning_variable(allows_unassigned = true)]
-    #[serde(rename = "vehicleIdx")]
+
+    /// Shadow: which vehicle this visit is assigned to.
+    #[inverse_relation_shadow_variable(source_variable_name = "visits")]
+    #[serde(skip)]
     pub vehicle_idx: Option<usize>,
+
+    /// Shadow: previous visit in the route (None if first).
+    #[previous_element_shadow_variable(source_variable_name = "visits")]
+    #[serde(skip)]
+    pub previous_visit_idx: Option<usize>,
+
+    /// Shadow: next visit in the route (None if last).
+    #[next_element_shadow_variable(source_variable_name = "visits")]
+    #[serde(skip)]
+    pub next_visit_idx: Option<usize>,
+
+    /// Shadow: computed arrival time at this visit.
+    #[cascading_update_shadow_variable]
+    #[serde(skip)]
+    pub arrival_time: Option<NaiveDateTime>,
 }
 
 impl Visit {
@@ -43,14 +71,43 @@ impl Visit {
             max_end_time,
             service_duration_seconds,
             vehicle_idx: None,
+            previous_visit_idx: None,
+            next_visit_idx: None,
+            arrival_time: None,
+        }
+    }
+
+    /// Calculate departure time from this visit.
+    pub fn departure_time(&self) -> Option<NaiveDateTime> {
+        self.arrival_time.map(|arrival| {
+            let service_start = arrival.max(self.min_start_time);
+            service_start + TimeDelta::seconds(self.service_duration_seconds)
+        })
+    }
+
+    /// Check if service finishes after max_end_time.
+    pub fn is_service_finished_after_max_end_time(&self) -> bool {
+        self.departure_time()
+            .is_some_and(|dep| dep > self.max_end_time)
+    }
+
+    /// Delay in minutes past max_end_time (for constraint penalty).
+    pub fn service_finished_delay_in_minutes(&self) -> i64 {
+        match self.departure_time() {
+            Some(dep) if dep > self.max_end_time => {
+                let delay = dep - self.max_end_time;
+                (delay.num_seconds() + 59) / 60 // Round up to next minute
+            }
+            _ => 0,
         }
     }
 }
 
 /// A vehicle that can service visits.
-#[problem_fact]
-#[derive(Serialize, Deserialize, Hash)]
+#[planning_entity]
+#[derive(Serialize, Deserialize)]
 pub struct Vehicle {
+    #[planning_id]
     pub index: usize,
     pub id: String,
     pub name: String,
@@ -59,6 +116,21 @@ pub struct Vehicle {
     pub home_location_idx: usize,
     #[serde(rename = "departureTime")]
     pub departure_time: NaiveDateTime,
+
+    /// Planning list variable: ordered visits assigned to this vehicle.
+    #[planning_list_variable]
+    #[serde(skip)]
+    pub visits: Vec<usize>,
+
+    /// Shadow aggregate: total demand of all visits assigned to this vehicle.
+    /// Auto-updated by solver when visits list changes.
+    #[serde(skip)]
+    pub total_demand: i32,
+
+    /// Shadow computed: total driving time in seconds for this vehicle's route.
+    /// Auto-updated by solver when visits list changes.
+    #[serde(skip)]
+    pub total_driving_time_seconds: i64,
 }
 
 impl Vehicle {
@@ -77,25 +149,34 @@ impl Vehicle {
             capacity,
             home_location_idx,
             departure_time,
+            visits: Vec::new(),
+            total_demand: 0,
+            total_driving_time_seconds: 0,
         }
     }
 }
 
 /// The vehicle routing solution.
 #[planning_solution]
-#[basic_variable_config(
-    entity_collection = "visits",
-    variable_field = "vehicle_idx",
-    variable_type = "usize",
-    value_range = "vehicles"
-)]
 #[solverforge_constraints_path = "crate::constraints::define_constraints"]
+#[shadow_variable_updates(
+    list_owner = "vehicles",
+    list_field = "visits",
+    element_collection = "visits",
+    element_type = "usize",
+    inverse_field = "vehicle_idx",
+    previous_field = "previous_visit_idx",
+    next_field = "next_visit_idx",
+    cascading_listener = "update_arrival_time",
+    entity_aggregate = "total_demand:sum:demand",
+    entity_compute = "total_driving_time_seconds:compute_vehicle_driving_time"
+)]
 #[derive(Serialize, Deserialize)]
 pub struct VehicleRoutePlan {
     pub name: String,
     #[serde(skip)]
     pub coordinates: Vec<(f64, f64)>,
-    #[problem_fact_collection]
+    #[planning_entity_collection]
     pub vehicles: Vec<Vehicle>,
     #[planning_entity_collection]
     pub visits: Vec<Visit>,
@@ -109,6 +190,8 @@ pub struct VehicleRoutePlan {
     pub solver_status: Option<String>,
     #[serde(skip)]
     pub travel_times: Vec<Vec<i64>>,
+    #[serde(skip)]
+    pub geometries: HashMap<(usize, usize), String>,
 }
 
 impl VehicleRoutePlan {
@@ -130,16 +213,18 @@ impl VehicleRoutePlan {
             score: None,
             solver_status: None,
             travel_times: Vec::new(),
+            geometries: HashMap::new(),
         }
     }
 
+    /// Get travel time in seconds between two location indices.
     #[inline]
     pub fn travel_time(&self, from_idx: usize, to_idx: usize) -> i64 {
         if self.travel_times.is_empty() {
             let (from_lat, from_lng) = self.coordinates[from_idx];
             let (to_lat, to_lng) = self.coordinates[to_idx];
             let dist = solverforge_maps::haversine_distance(from_lat, from_lng, to_lat, to_lng);
-            (dist / 13.89).round() as i64
+            (dist / 13.89).round() as i64 // ~50 km/h
         } else {
             self.travel_times[from_idx][to_idx]
         }
@@ -148,5 +233,82 @@ impl VehicleRoutePlan {
     #[inline]
     pub fn get_coordinates(&self, idx: usize) -> Option<(f64, f64)> {
         self.coordinates.get(idx).copied()
+    }
+
+    #[inline]
+    pub fn visit(&self, visit_idx: usize) -> &Visit {
+        &self.visits[visit_idx]
+    }
+
+    /// Calculate total demand for a vehicle.
+    pub fn vehicle_total_demand(&self, vehicle: &Vehicle) -> i32 {
+        vehicle
+            .visits
+            .iter()
+            .map(|&idx| self.visits[idx].demand)
+            .sum()
+    }
+
+    /// Calculate total driving time in seconds for a vehicle route.
+    pub fn vehicle_total_driving_time_seconds(&self, vehicle: &Vehicle) -> i64 {
+        if vehicle.visits.is_empty() {
+            return 0;
+        }
+
+        let mut total = 0i64;
+        let mut prev_loc = vehicle.home_location_idx;
+
+        for &visit_idx in &vehicle.visits {
+            let visit_loc = self.visits[visit_idx].location_idx;
+            total += self.travel_time(prev_loc, visit_loc);
+            prev_loc = visit_loc;
+        }
+
+        // Return to home
+        total += self.travel_time(prev_loc, vehicle.home_location_idx);
+        total
+    }
+
+    /// Shadow variable computation: calculate total driving time for a vehicle entity.
+    /// Called by solver when vehicle's visits list changes.
+    pub fn compute_vehicle_driving_time(&self, entity_idx: usize) -> i64 {
+        let vehicle = &self.vehicles[entity_idx];
+        self.vehicle_total_driving_time_seconds(vehicle)
+    }
+
+    /// Cascading shadow variable listener: update arrival_time for a visit.
+    /// Called by solver when previous visit or vehicle assignment changes.
+    pub fn update_arrival_time(&mut self, visit_idx: usize) {
+        let visit = &self.visits[visit_idx];
+
+        // Get vehicle and previous visit info
+        let vehicle_idx = match visit.vehicle_idx {
+            Some(idx) => idx,
+            None => {
+                // Not assigned to any vehicle
+                self.visits[visit_idx].arrival_time = None;
+                return;
+            }
+        };
+
+        let vehicle = &self.vehicles[vehicle_idx];
+
+        // Determine departure location and time
+        let (prev_loc, departure_time) = match visit.previous_visit_idx {
+            Some(prev_idx) => {
+                let prev_visit = &self.visits[prev_idx];
+                let dep_time = prev_visit.departure_time().unwrap_or(vehicle.departure_time);
+                (prev_visit.location_idx, dep_time)
+            }
+            None => {
+                // First visit in route - depart from vehicle home
+                (vehicle.home_location_idx, vehicle.departure_time)
+            }
+        };
+
+        // Calculate arrival time
+        let travel_seconds = self.travel_time(prev_loc, self.visits[visit_idx].location_idx);
+        let arrival = departure_time + TimeDelta::seconds(travel_seconds);
+        self.visits[visit_idx].arrival_time = Some(arrival);
     }
 }
