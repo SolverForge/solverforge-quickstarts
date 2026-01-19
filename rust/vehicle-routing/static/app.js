@@ -14,6 +14,37 @@ const vehiclesTable = $("#vehicles");
 const analyzeButton = $("#analyzeButton");
 
 /**
+ * Display an error message to the user.
+ * @param {string} message - The error message to display
+ * @param {object} xhr - The XMLHttpRequest object (optional)
+ */
+function showError(message, xhr) {
+  console.error(message, xhr);
+  const details = xhr && xhr.responseText ? `\n${xhr.responseText}` : '';
+  showNotification(message + details, "error");
+}
+
+/**
+ * Generate a consistent color for a given key.
+ * Uses a hash function to generate colors from strings.
+ * @param {string} key - The key to generate a color for
+ * @returns {string} A hex color code
+ */
+function pickColor(key) {
+  if (!key) return '#6b7280';
+
+  // Simple hash function
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    hash = key.charCodeAt(i) + ((hash << 5) - hash);
+  }
+
+  // Generate HSL color with fixed saturation and lightness for consistency
+  const hue = Math.abs(hash % 360);
+  return `hsl(${hue}, 65%, 50%)`;
+}
+
+/**
  * Decode an encoded polyline string into an array of [lat, lng] coordinates.
  * This is the Google polyline encoding algorithm.
  * @param {string} encoded - The encoded polyline string
@@ -493,6 +524,12 @@ async function confirmAddVehicle() {
   // Refresh display
   await renderRoutes(loadedRoutePlan);
   renderTimelines(loadedRoutePlan);
+
+  // Pan map to show the new vehicle
+  const newMarker = homeLocationMarkerByIdMap.get(newId);
+  if (newMarker) {
+    map.setView([lat, lng], map.getZoom(), { animate: true });
+  }
 
   showNotification(`Vehicle "${vehicleName}" added successfully!`, "success");
 }
@@ -1260,7 +1297,13 @@ function openRecommendationModal(lat, lng) {
     return;
   }
   // see recommended-fit.js
-  const visitId = Math.max(...loadedRoutePlan.visits.map(c => parseInt(c.id))) + 1;
+  // Extract numeric IDs from visit IDs like "v0", "v1", etc.
+  const maxId = Math.max(...loadedRoutePlan.visits.map(v => {
+    const idStr = v.id.toString();
+    const numericPart = idStr.replace(/\D/g, ''); // Remove non-digits
+    return numericPart ? parseInt(numericPart) : -1;
+  }));
+  const visitId = `v${maxId + 1}`;
   newVisit = {id: visitId, location: [lat, lng]};
   addNewVisit(visitId, lat, lng, map, visitMarker);
 }
@@ -1286,6 +1329,7 @@ function getRecommendationsModal() {
 
     const updatedVisit = {
       ...newVisit,
+      demand: parseInt(newVisit['demand']), // Ensure demand is an integer
       serviceDuration: parseInt(newVisit['serviceDuration']) * 60, // Convert minutes to seconds
       minStartTime: updatedMinStartTime,
       maxEndTime: updatedMaxEndTime
@@ -1335,6 +1379,7 @@ function applyRecommendationModal(recommendations) {
 
   const updatedVisit = {
     ...newVisit,
+    demand: parseInt(newVisit['demand']), // Ensure demand is an integer
     serviceDuration: parseInt(newVisit['serviceDuration']) * 60, // Convert minutes to seconds
     minStartTime: updatedMinStartTime,
     maxEndTime: updatedMaxEndTime
