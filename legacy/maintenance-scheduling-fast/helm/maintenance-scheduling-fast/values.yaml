@@ -1,7 +1,7 @@
 replicaCount: 1
 
 image:
-  repository: ghcr.io/blackopsrepl/maintenance-scheduling-fast
+  repository: ghcr.io/solverforge/maintenance-scheduling-fast
   pullPolicy: IfNotPresent
   tag: "latest"
 
