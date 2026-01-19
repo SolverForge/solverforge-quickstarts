@@ -1297,7 +1297,13 @@ function openRecommendationModal(lat, lng) {
     return;
   }
   // see recommended-fit.js
-  const visitId = Math.max(...loadedRoutePlan.visits.map(c => parseInt(c.id))) + 1;
+  // Extract numeric IDs from visit IDs like "v0", "v1", etc.
+  const maxId = Math.max(...loadedRoutePlan.visits.map(v => {
+    const idStr = v.id.toString();
+    const numericPart = idStr.replace(/\D/g, ''); // Remove non-digits
+    return numericPart ? parseInt(numericPart) : -1;
+  }));
+  const visitId = `v${maxId + 1}`;
   newVisit = {id: visitId, location: [lat, lng]};
   addNewVisit(visitId, lat, lng, map, visitMarker);
 }
@@ -1323,6 +1329,7 @@ function getRecommendationsModal() {
 
     const updatedVisit = {
       ...newVisit,
+      demand: parseInt(newVisit['demand']), // Ensure demand is an integer
       serviceDuration: parseInt(newVisit['serviceDuration']) * 60, // Convert minutes to seconds
       minStartTime: updatedMinStartTime,
       maxEndTime: updatedMaxEndTime
@@ -1372,6 +1379,7 @@ function applyRecommendationModal(recommendations) {
 
   const updatedVisit = {
     ...newVisit,
+    demand: parseInt(newVisit['demand']), // Ensure demand is an integer
     serviceDuration: parseInt(newVisit['serviceDuration']) * 60, // Convert minutes to seconds
     minStartTime: updatedMinStartTime,
     maxEndTime: updatedMaxEndTime
