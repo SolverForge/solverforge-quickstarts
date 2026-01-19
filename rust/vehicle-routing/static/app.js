@@ -525,6 +525,12 @@ async function confirmAddVehicle() {
   await renderRoutes(loadedRoutePlan);
   renderTimelines(loadedRoutePlan);
 
+  // Pan map to show the new vehicle
+  const newMarker = homeLocationMarkerByIdMap.get(newId);
+  if (newMarker) {
+    map.setView([lat, lng], map.getZoom(), { animate: true });
+  }
+
   showNotification(`Vehicle "${vehicleName}" added successfully!`, "success");
 }
 
