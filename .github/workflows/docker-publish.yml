@@ -143,7 +143,8 @@ jobs:
       - name: Determine if push is allowed
         id: push-check
         run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+          # Push only on tags and dev branch
+          if [[ "${{ github.ref_type }}" == "tag" || "${{ github.ref }}" == "refs/heads/dev" ]]; then
             echo "push=true" >> $GITHUB_OUTPUT
           else
             echo "push=false" >> $GITHUB_OUTPUT
