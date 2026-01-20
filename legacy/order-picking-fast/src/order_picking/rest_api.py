@@ -286,4 +286,9 @@ async def list_solutions() -> List[str]:
     return list(data_sets.keys())
 
 
+@app.get("/healthz")
+async def healthz():
+    return {"status": "UP"}
+
+
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

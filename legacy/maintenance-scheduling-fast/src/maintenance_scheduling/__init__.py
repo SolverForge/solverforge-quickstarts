@@ -5,7 +5,7 @@ from .rest_api import app as app
 
 def main():
     config = uvicorn.Config("maintenance_scheduling:app",
-                            port=8080,
+                            port=7860,
                             log_config="logging.conf",
                             use_colors=True)
     server = uvicorn.Server(config)

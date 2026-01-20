@@ -7,10 +7,12 @@ use axum::{
     Json, Router,
 };
 use parking_lot::RwLock;
+use solverforge::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::constraints::create_fluent_constraints;
 use crate::demo_data::{self, DemoData};
 use crate::domain::EmployeeSchedule;
 use crate::dto::*;
@@ -41,6 +43,7 @@ impl Default for AppState {
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/healthz", get(health))
         .route("/info", get(info))
         .route("/demo-data", get(list_demo_data))
         .route("/demo-data/{id}", get(get_demo_data))
@@ -88,10 +91,13 @@ async fn create_schedule(
 
     {
         let mut jobs = state.jobs.write();
-        jobs.insert(id.clone(), SolveJob {
-            solution: schedule.clone(),
-            solver_status: "SOLVING".to_string(),
-        });
+        jobs.insert(
+            id.clone(),
+            SolveJob {
+                solution: schedule.clone(),
+                solver_status: "SOLVING".to_string(),
+            },
+        );
     }
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -111,7 +117,6 @@ async fn create_schedule(
         }
     });
 
-    use solverforge::Solvable;
     rayon::spawn(move || {
         schedule.solve(None, tx);
     });
@@ -128,9 +133,10 @@ async fn get_schedule(
     Path(id): Path<String>,
 ) -> Result<Json<ScheduleDto>, StatusCode> {
     match state.jobs.read().get(&id) {
-        Some(job) => {
-            Ok(Json(ScheduleDto::from_schedule(&job.solution, Some(job.solver_status.clone()))))
-        }
+        Some(job) => Ok(Json(ScheduleDto::from_schedule(
+            &job.solution,
+            Some(job.solver_status.clone()),
+        ))),
         None => Err(StatusCode::NOT_FOUND),
     }
 }
@@ -140,19 +146,14 @@ async fn get_schedule_status(
     Path(id): Path<String>,
 ) -> Result<Json<StatusResponse>, StatusCode> {
     match state.jobs.read().get(&id) {
-        Some(job) => {
-            Ok(Json(StatusResponse {
-                score: job.solution.score.map(|s| format!("{}", s)),
-            }))
-        }
+        Some(job) => Ok(Json(StatusResponse {
+            score: job.solution.score.map(|s| format!("{}", s)),
+        })),
         None => Err(StatusCode::NOT_FOUND),
     }
 }
 
-async fn stop_solving(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> StatusCode {
+async fn stop_solving(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> StatusCode {
     if state.jobs.write().remove(&id).is_some() {
         StatusCode::NO_CONTENT
     } else {
@@ -161,32 +162,29 @@ async fn stop_solving(
 }
 
 async fn analyze_schedule(Json(dto): Json<ScheduleDto>) -> Json<AnalyzeResponse> {
-    use crate::constraints::create_fluent_constraints;
-    use solverforge::{ConstraintSet, TypedScoreDirector};
-
     let schedule = dto.to_domain();
     let constraints = create_fluent_constraints();
-    let mut director = TypedScoreDirector::new(schedule, constraints);
-    let score = director.calculate_score();
-    let analyses = director.constraints().evaluate_detailed(director.working_solution());
+    let director = ScoreDirector::new(schedule, constraints);
+    let score = director.get_score();
+    let analyses = director
+        .constraints()
+        .evaluate_detailed(director.working_solution());
 
     let constraints_dto: Vec<ConstraintAnalysisDto> = analyses
         .into_iter()
-        .map(|analysis| {
-            ConstraintAnalysisDto {
-                name: analysis.constraint_ref.name.clone(),
-                constraint_type: if analysis.is_hard { "hard" } else { "soft" }.to_string(),
-                weight: format!("{}", analysis.weight),
-                score: format!("{}", analysis.score),
-                matches: analysis
-                    .matches
-                    .iter()
-                    .map(|m| ConstraintMatchDto {
-                        score: format!("{}", m.score),
-                        justification: m.justification.description.clone(),
-                    })
-                    .collect(),
-            }
+        .map(|analysis| ConstraintAnalysisDto {
+            name: analysis.constraint_ref.name.clone(),
+            constraint_type: if analysis.is_hard { "hard" } else { "soft" }.to_string(),
+            weight: format!("{}", analysis.weight),
+            score: format!("{}", analysis.score),
+            matches: analysis
+                .matches
+                .iter()
+                .map(|m| ConstraintMatchDto {
+                    score: format!("{}", m.score),
+                    justification: m.justification.description.clone(),
+                })
+                .collect(),
         })
         .collect();
 

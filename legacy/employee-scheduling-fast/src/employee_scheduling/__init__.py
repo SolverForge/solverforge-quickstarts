@@ -7,7 +7,7 @@ def main():
     config = uvicorn.Config(
         "employee_scheduling:app",
         host="0.0.0.0",
-        port=8080,
+        port=7860,
         log_config="logging.conf",
         use_colors=True,
     )

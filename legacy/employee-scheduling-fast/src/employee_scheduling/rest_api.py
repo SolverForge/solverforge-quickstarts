@@ -125,4 +125,9 @@ async def analyze_schedule(request: Request) -> Dict:
     return {"constraints": [constraint.model_dump() for constraint in constraints]}
 
 
+@app.get("/healthz")
+async def healthz():
+    return {"status": "UP"}
+
+
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

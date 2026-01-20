@@ -17,8 +17,8 @@ COPY . .
 # Install the application
 RUN pip install --no-cache-dir -e .
 
-# Expose port 8080
-EXPOSE 8080
+# Expose port 7860
+EXPOSE 7860
 
 # Run the application
 CMD ["run-app"]

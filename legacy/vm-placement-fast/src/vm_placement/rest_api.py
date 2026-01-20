@@ -147,4 +147,9 @@ async def stop_solving(problem_id: str) -> VMPlacementPlanModel:
     return plan_to_model(placement)
 
 
+@app.get("/healthz")
+async def healthz():
+    return {"status": "UP"}
+
+
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

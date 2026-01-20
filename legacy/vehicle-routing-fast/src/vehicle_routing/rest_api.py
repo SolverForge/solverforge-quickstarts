@@ -521,4 +521,9 @@ async def get_route_geometry(problem_id: str) -> RouteGeometryResponse:
     return RouteGeometryResponse(geometries=geometries)
 
 
+@app.get("/healthz")
+async def healthz():
+    return {"status": "UP"}
+
+
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
