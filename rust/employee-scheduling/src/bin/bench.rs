@@ -3,7 +3,7 @@
 //! Run with: cargo run --release -p employee-scheduling --bin bench
 
 use employee_scheduling::{constraints, demo_data};
-use solverforge::TypedScoreDirector;
+use solverforge::prelude::TypedScoreDirector;
 use std::time::Instant;
 
 fn main() {
@@ -21,8 +21,12 @@ fn main() {
 
     // Initialize
     let init_start = Instant::now();
-    let initial_score = director.calculate_score();
-    println!("Initial score: {} ({:?})", initial_score, init_start.elapsed());
+    let initial_score = director.get_score();
+    println!(
+        "Initial score: {} ({:?})",
+        initial_score,
+        init_start.elapsed()
+    );
     println!();
 
     // Benchmark: deterministic do/undo cycle for each shift×employee combination
