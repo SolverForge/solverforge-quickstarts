@@ -1,48 +1,26 @@
 //! REST API handlers for Vehicle Routing.
+//!
+//! Uses SSE (Server-Sent Events) for all streaming operations:
+//! - Demo data loading with real roads
+//! - Solving with real-time solution updates
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, Query},
     http::StatusCode,
     response::sse::{Event, KeepAlive, Sse},
-    routing::{delete, get, post, put},
+    routing::{get, post, put},
     Json, Router,
 };
 use futures::stream::Stream;
-use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use solverforge::Solvable;
 use solverforge_maps::{BoundingBox, RoadNetwork, RoutingProgress};
 use std::collections::HashMap;
 use std::convert::Infallible;
-use std::sync::Arc;
 use tokio::sync::mpsc;
-use uuid::Uuid;
 
 use crate::demo_data::{self, DemoData};
-use crate::domain::VehicleRoutePlan;
 use crate::dto::*;
-
-struct SolveJob {
-    solution: VehicleRoutePlan,
-    solver_status: String,
-}
-
-pub struct AppState {
-    jobs: RwLock<HashMap<String, SolveJob>>,
-}
-
-impl AppState {
-    pub fn new() -> Self {
-        Self {
-            jobs: RwLock::new(HashMap::new()),
-        }
-    }
-}
-
-impl Default for AppState {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 #[derive(Debug, Deserialize)]
 pub struct RoutingQuery {
@@ -50,21 +28,15 @@ pub struct RoutingQuery {
     pub routing: Option<String>,
 }
 
-pub fn router(state: Arc<AppState>) -> Router {
+pub fn router() -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/info", get(info))
         .route("/demo-data", get(list_demo_data))
         .route("/demo-data/{id}", get(get_demo_data))
         .route("/demo-data/{id}/stream", get(get_demo_data_stream))
-        .route("/route-plans", post(create_route_plan))
-        .route("/route-plans", get(list_route_plans))
+        .route("/route-plans", post(solve_route_plan))
         .route("/route-plans/analyze", put(analyze_route_plan))
-        .route("/route-plans/{id}", get(get_route_plan))
-        .route("/route-plans/{id}/status", get(get_route_plan_status))
-        .route("/route-plans/{id}/geometry", get(get_route_geometry))
-        .route("/route-plans/{id}", delete(stop_solving))
-        .with_state(state)
 }
 
 async fn health() -> Json<HealthResponse> {
@@ -100,15 +72,8 @@ async fn get_demo_data(
                     plan.north_east_corner.1,
                 );
 
-                // Use unified API with a progress channel that drains buffered messages
                 let (tx, mut rx) = mpsc::channel::<RoutingProgress>(100);
-
-                // Spawn a task to consume progress messages (non-streaming, so we just drain)
-                tokio::spawn(async move {
-                    while rx.recv().await.is_some() {
-                        // Discard progress messages in non-streaming mode
-                    }
-                });
+                tokio::spawn(async move { while rx.recv().await.is_some() {} });
 
                 if let Ok(result) =
                     RoadNetwork::load_and_compute(&bbox, &plan.coordinates, tx).await
@@ -124,6 +89,7 @@ async fn get_demo_data(
     }
 }
 
+// SSE Event types
 #[derive(Serialize)]
 struct SseProgress {
     event: &'static str,
@@ -138,6 +104,18 @@ struct SseProgress {
 struct SseComplete {
     event: &'static str,
     solution: VehicleRoutePlanDto,
+}
+
+#[derive(Serialize)]
+struct SseSolution {
+    event: &'static str,
+    solution: VehicleRoutePlanDto,
+    score: String,
+}
+
+#[derive(Serialize)]
+struct SseSolveComplete {
+    event: &'static str,
 }
 
 #[derive(Serialize)]
@@ -164,7 +142,6 @@ async fn get_demo_data_stream(
         let use_real_roads = query.routing.as_deref() == Some("real_roads");
 
         if !use_real_roads {
-            // Fast path - haversine
             let progress = SseProgress { event: "progress", phase: "computing", message: "Computing distances...", percent: 50, detail: None };
             yield Ok(Event::default().data(serde_json::to_string(&progress).unwrap()));
 
@@ -175,7 +152,6 @@ async fn get_demo_data_stream(
             let complete = SseComplete { event: "complete", solution: dto };
             yield Ok(Event::default().data(serde_json::to_string(&complete).unwrap()));
         } else {
-            // Real roads path - use unified API with progress streaming
             let bbox = BoundingBox::new(
                 plan.south_west_corner.0,
                 plan.south_west_corner.1,
@@ -183,29 +159,24 @@ async fn get_demo_data_stream(
                 plan.north_east_corner.1,
             );
 
-            // Create progress channel
             let (tx, mut rx) = mpsc::channel::<RoutingProgress>(100);
-
-            // Spawn the computation task
             let coordinates = plan.coordinates.clone();
             let compute_handle = tokio::spawn(async move {
                 RoadNetwork::load_and_compute(&bbox, &coordinates, tx).await
             });
 
-            // Stream progress events as they arrive
             while let Some(progress) = rx.recv().await {
-                let (phase, message) = progress_to_phase_message(&progress);
+                let (phase, message) = progress.phase_message();
                 let sse_progress = SseProgress {
                     event: "progress",
                     phase,
                     message,
                     percent: progress.percent(),
-                    detail: progress_detail(&progress),
+                    detail: progress.detail(),
                 };
                 yield Ok(Event::default().data(serde_json::to_string(&sse_progress).unwrap()));
             }
 
-            // Get final result
             match compute_handle.await {
                 Ok(Ok(result)) => {
                     plan.travel_times = result.travel_times;
@@ -233,181 +204,95 @@ async fn get_demo_data_stream(
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
-/// Converts RoutingProgress to (phase, message) for SSE.
-fn progress_to_phase_message(progress: &RoutingProgress) -> (&'static str, &'static str) {
-    match progress {
-        RoutingProgress::CheckingCache { .. } => ("cache", "Checking cache..."),
-        RoutingProgress::DownloadingNetwork { .. } => ("network", "Downloading road network..."),
-        RoutingProgress::ParsingOsm { .. } => ("parsing", "Parsing OSM data..."),
-        RoutingProgress::BuildingGraph { .. } => ("building", "Building routing graph..."),
-        RoutingProgress::ComputingMatrix { .. } => ("matrix", "Computing travel times..."),
-        RoutingProgress::ComputingGeometries { .. } => ("geometry", "Computing route geometries..."),
-        RoutingProgress::EncodingGeometries { .. } => ("encoding", "Encoding geometries..."),
-        RoutingProgress::Complete => ("complete", "Ready!"),
-    }
-}
-
-/// Extracts detail string from RoutingProgress for SSE.
-fn progress_detail(progress: &RoutingProgress) -> Option<String> {
-    match progress {
-        RoutingProgress::DownloadingNetwork { bytes, .. } if *bytes > 0 => {
-            Some(format!("{} KB downloaded", bytes / 1024))
-        }
-        RoutingProgress::ParsingOsm { nodes, edges, .. } => {
-            Some(format!("{} nodes, {} edges", nodes, edges))
-        }
-        RoutingProgress::ComputingMatrix { row, total, .. } => {
-            Some(format!("Row {}/{}", row, total))
-        }
-        RoutingProgress::ComputingGeometries { pair, total, .. } => {
-            Some(format!("Pair {}/{}", pair, total))
-        }
-        _ => None,
-    }
-}
-
-async fn create_route_plan(
-    State(state): State<Arc<AppState>>,
+/// SSE endpoint for solving. Streams:
+/// 1. Progress events during road network loading (if real_roads)
+/// 2. Solution events as solver finds better solutions
+/// 3. Complete event when solver finishes
+async fn solve_route_plan(
     Query(query): Query<RoutingQuery>,
     Json(dto): Json<VehicleRoutePlanDto>,
-) -> String {
-    let id = Uuid::new_v4().to_string();
-    let mut plan = dto.to_domain();
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let stream = async_stream::stream! {
+        let mut plan = dto.to_domain();
 
-    // Load road network and compute matrix if real_roads routing requested
-    if query.routing.as_deref() == Some("real_roads") {
-        let bbox = BoundingBox::new(
-            plan.south_west_corner.0,
-            plan.south_west_corner.1,
-            plan.north_east_corner.0,
-            plan.north_east_corner.1,
-        );
+        // 1. Load road network if requested (with progress streaming)
+        let geometries = if query.routing.as_deref() == Some("real_roads") {
+            let bbox = BoundingBox::new(
+                plan.south_west_corner.0,
+                plan.south_west_corner.1,
+                plan.north_east_corner.0,
+                plan.north_east_corner.1,
+            );
 
-        // Use unified API with a progress channel that drains buffered messages
-        let (tx, mut rx) = mpsc::channel::<RoutingProgress>(100);
+            let (tx, mut rx) = mpsc::channel::<RoutingProgress>(100);
+            let coordinates = plan.coordinates.clone();
+            let compute_handle = tokio::spawn(async move {
+                RoadNetwork::load_and_compute(&bbox, &coordinates, tx).await
+            });
 
-        // Spawn a task to consume progress messages (non-streaming, so we just drain)
-        tokio::spawn(async move {
-            while rx.recv().await.is_some() {
-                // Discard progress messages in non-streaming mode
+            // Stream progress events
+            while let Some(progress) = rx.recv().await {
+                let (phase, message) = progress.phase_message();
+                let sse_progress = SseProgress {
+                    event: "progress",
+                    phase,
+                    message,
+                    percent: progress.percent(),
+                    detail: progress.detail(),
+                };
+                yield Ok(Event::default().data(serde_json::to_string(&sse_progress).unwrap()));
             }
+
+            match compute_handle.await {
+                Ok(Ok(result)) => {
+                    plan.travel_times = result.travel_times;
+                    result.geometries
+                }
+                Ok(Err(e)) => {
+                    let err = SseError { event: "error", message: format!("Failed to load road network: {}", e) };
+                    yield Ok(Event::default().data(serde_json::to_string(&err).unwrap()));
+                    return;
+                }
+                Err(e) => {
+                    let err = SseError { event: "error", message: format!("Task panicked: {}", e) };
+                    yield Ok(Event::default().data(serde_json::to_string(&err).unwrap()));
+                    return;
+                }
+            }
+        } else {
+            HashMap::new()
+        };
+
+        // 2. Start solver with channel for solution updates
+        // When the SSE stream closes, solver_rx is dropped, which closes the channel.
+        // The solver detects sender.is_closed() and terminates automatically.
+        let (solver_tx, mut solver_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        rayon::spawn(move || {
+            plan.solve(None, solver_tx);
         });
 
-        if let Ok(result) = RoadNetwork::load_and_compute(&bbox, &plan.coordinates, tx).await {
-            plan.travel_times = result.travel_times;
-            plan.geometries = result.geometries;
+        // 3. Stream solutions as they arrive
+        while let Some((solution, score)) = solver_rx.recv().await {
+            let dto = VehicleRoutePlanDto::from_plan_with_geometries(
+                &solution,
+                &geometries,
+                Some("SOLVING".to_string()),
+            );
+            let event = SseSolution {
+                event: "solution",
+                solution: dto,
+                score: format!("{}", score),
+            };
+            yield Ok(Event::default().data(serde_json::to_string(&event).unwrap()));
         }
-    }
 
-    {
-        let mut jobs = state.jobs.write();
-        jobs.insert(
-            id.clone(),
-            SolveJob {
-                solution: plan.clone(),
-                solver_status: "SOLVING".to_string(),
-            },
-        );
-    }
+        // 4. Solver finished (either naturally or because channel was closed)
+        let complete = SseSolveComplete { event: "complete" };
+        yield Ok(Event::default().data(serde_json::to_string(&complete).unwrap()));
+    };
 
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let job_id = id.clone();
-    let state_clone = state.clone();
-
-    tokio::spawn(async move {
-        while let Some((solution, _score)) = rx.recv().await {
-            let mut jobs = state_clone.jobs.write();
-            if let Some(job) = jobs.get_mut(&job_id) {
-                job.solution = solution;
-            }
-        }
-        let mut jobs = state_clone.jobs.write();
-        if let Some(job) = jobs.get_mut(&job_id) {
-            job.solver_status = "NOT_SOLVING".to_string();
-        }
-    });
-
-    use solverforge::Solvable;
-    rayon::spawn(move || {
-        plan.solve(None, tx);
-    });
-
-    id
-}
-
-async fn list_route_plans(State(state): State<Arc<AppState>>) -> Json<Vec<String>> {
-    Json(state.jobs.read().keys().cloned().collect())
-}
-
-async fn get_route_plan(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Result<Json<VehicleRoutePlanDto>, StatusCode> {
-    match state.jobs.read().get(&id) {
-        Some(job) => Ok(Json(VehicleRoutePlanDto::from_plan(
-            &job.solution,
-            Some(job.solver_status.clone()),
-        ))),
-        None => Err(StatusCode::NOT_FOUND),
-    }
-}
-
-async fn get_route_plan_status(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Result<Json<StatusResponse>, StatusCode> {
-    match state.jobs.read().get(&id) {
-        Some(job) => Ok(Json(StatusResponse {
-            score: job.solution.score.map(|s| format!("{}", s)),
-        })),
-        None => Err(StatusCode::NOT_FOUND),
-    }
-}
-
-async fn stop_solving(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> StatusCode {
-    if state.jobs.write().remove(&id).is_some() {
-        StatusCode::NO_CONTENT
-    } else {
-        StatusCode::NOT_FOUND
-    }
-}
-
-async fn get_route_geometry(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Result<Json<GeometryResponse>, StatusCode> {
-    let jobs = state.jobs.read();
-    let job = jobs.get(&id).ok_or(StatusCode::NOT_FOUND)?;
-    let plan = &job.solution;
-
-    let mut segments = Vec::new();
-    for (v_idx, vehicle) in plan.vehicles.iter().enumerate() {
-        let mut prev_loc = vehicle.home_location_idx;
-        for &visit_idx in &vehicle.visits {
-            let visit_loc = plan.visits[visit_idx].location_idx;
-            if let Some(polyline) = plan.geometries.get(&(prev_loc, visit_loc)) {
-                segments.push(GeometrySegment {
-                    vehicle_idx: v_idx,
-                    polyline: polyline.clone(),
-                });
-            }
-            prev_loc = visit_loc;
-        }
-        // Return to home
-        if !vehicle.visits.is_empty() {
-            if let Some(polyline) = plan.geometries.get(&(prev_loc, vehicle.home_location_idx)) {
-                segments.push(GeometrySegment {
-                    vehicle_idx: v_idx,
-                    polyline: polyline.clone(),
-                });
-            }
-        }
-    }
-
-    Ok(Json(GeometryResponse { segments }))
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
 async fn analyze_route_plan(Json(dto): Json<VehicleRoutePlanDto>) -> Json<AnalyzeResponse> {

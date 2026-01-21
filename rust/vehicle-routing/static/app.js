@@ -1,13 +1,11 @@
-let autoRefreshIntervalId = null;
 let initialized = false;
 let optimizing = false;
 let demoDataId = null;
-let scheduleId = null;
 let loadedRoutePlan = null;
 let newVisit = null;
 let visitMarker = null;
-let routeGeometries = null;  // Cache for encoded polyline geometries
-let useRealRoads = true;     // Routing mode toggle state (default: real roads)
+let useRealRoads = false; // Routing mode toggle state (default: haversine)
+let solveAbortController = null; // AbortController for SSE solve connection
 const solveButton = $("#solveButton");
 const stopSolvingButton = $("#stopSolvingButton");
 const vehiclesTable = $("#vehicles");
@@ -37,7 +35,7 @@ function decodePolyline(encoded) {
       result |= (byte & 0x1f) << shift;
       shift += 5;
     } while (byte >= 0x20);
-    const dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
+    const dlat = result & 1 ? ~(result >> 1) : result >> 1;
     lat += dlat;
 
     // Decode longitude
@@ -48,7 +46,7 @@ function decodePolyline(encoded) {
       result |= (byte & 0x1f) << shift;
       shift += 5;
     } while (byte >= 0x20);
-    const dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
+    const dlng = result & 1 ? ~(result >> 1) : result >> 1;
     lng += dlng;
 
     // Polyline encoding uses precision of 5 decimal places
@@ -59,36 +57,17 @@ function decodePolyline(encoded) {
 }
 
 /**
- * Fetch route geometries for the current schedule from the backend.
- * @returns {Promise<Object|null>} The geometries object or null if unavailable
+ * Store raw geometries map. Format: { "fromIdx-toIdx": "encodedPolyline" }
+ * Frontend looks up geometries by location index pairs when drawing routes.
  */
-async function fetchRouteGeometries() {
-  if (!scheduleId) return null;
-
-  try {
-    const response = await fetch(`/route-plans/${scheduleId}/geometry`);
-    if (response.ok) {
-      const data = await response.json();
-      // Transform segments array into map: { vehicleId: [polyline] }
-      const geometries = {};
-      for (const segment of data.segments || []) {
-        const vehicleId = String(segment.vehicle_idx);
-        if (!geometries[vehicleId]) {
-          geometries[vehicleId] = [];
-        }
-        geometries[vehicleId].push(segment.polyline);
-      }
-      return Object.keys(geometries).length > 0 ? geometries : null;
-    }
-  } catch (e) {
-    console.warn('Could not fetch route geometries:', e);
-  }
-  return null;
-}
+let rawGeometries = null;
 
 /*************************************** Loading Overlay Functions **************************************/
 
-function showLoadingOverlay(title = "Loading Demo Data", message = "Initializing...") {
+function showLoadingOverlay(
+  title = "Loading Demo Data",
+  message = "Initializing...",
+) {
   $("#loadingTitle").text(title);
   $("#loadingMessage").text(message);
   $("#loadingProgress").css("width", "0%");
@@ -117,13 +96,13 @@ function loadDemoDataWithProgress(demoId) {
 
     showLoadingOverlay(
       useRealRoads ? "Loading Real Road Data" : "Loading Demo Data",
-      "Connecting..."
+      "Connecting...",
     );
 
     const eventSource = new EventSource(url);
     let solution = null;
 
-    eventSource.onmessage = function(event) {
+    eventSource.onmessage = function (event) {
       try {
         const data = JSON.parse(event.data);
 
@@ -134,14 +113,15 @@ function loadDemoDataWithProgress(demoId) {
           } else if (data.phase === "routes") {
             statusIcon = '<i class="fas fa-route me-2"></i>';
           } else if (data.phase === "complete") {
-            statusIcon = '<i class="fas fa-check-circle me-2 text-success"></i>';
+            statusIcon =
+              '<i class="fas fa-check-circle me-2 text-success"></i>';
           }
           updateLoadingProgress(data.message, data.percent, data.detail || "");
         } else if (data.event === "complete") {
           solution = data.solution;
-          // Store geometries from the response if available
-          if (data.geometries) {
-            routeGeometries = data.geometries;
+          // Store raw geometries map for route drawing
+          if (solution.geometries) {
+            rawGeometries = solution.geometries;
           }
           eventSource.close();
           hideLoadingOverlay();
@@ -156,7 +136,7 @@ function loadDemoDataWithProgress(demoId) {
       }
     };
 
-    eventSource.onerror = function(error) {
+    eventSource.onerror = function (error) {
       eventSource.close();
       hideLoadingOverlay();
       reject(new Error("Connection lost while loading data"));
@@ -217,8 +197,7 @@ let vehicleDeparturePicker = null;
 
 // Route highlighting state
 let highlightedVehicleId = null;
-let routeNumberMarkers = [];  // Markers showing 1, 2, 3... on route stops
-
+let routeNumberMarkers = []; // Markers showing 1, 2, 3... on route stops
 
 $(document).ready(function () {
   replaceQuickstartSolverForgeAutoHeaderFooter();
@@ -309,19 +288,18 @@ $(document).ready(function () {
   });
 
   // Real Roads toggle handler
-  $(document).on('change', '#realRoadRouting', function() {
-    useRealRoads = $(this).is(':checked');
+  $(document).on("change", "#realRoadRouting", function () {
+    useRealRoads = $(this).is(":checked");
 
     // If we have a demo dataset loaded, reload it with the new routing mode
     if (demoDataId && !optimizing) {
-      scheduleId = null;
       initialized = false;
       homeLocationGroup.clearLayers();
       homeLocationMarkerByIdMap.clear();
       visitGroup.clearLayers();
       visitMarkerByIdMap.clear();
-      routeGeometries = null;
-      refreshRoutePlan();
+      rawGeometries = null;
+      loadDemoData();
     }
   });
 
@@ -344,7 +322,9 @@ function openAddVehicleModal() {
   addingVehicleMode = true;
 
   // Suggest next vehicle name
-  $("#vehicleName").val("").attr("placeholder", `e.g., ${getNextVehicleName()}`);
+  $("#vehicleName")
+    .val("")
+    .attr("placeholder", `e.g., ${getNextVehicleName()}`);
 
   // Set default values based on existing vehicles
   const existingVehicle = loadedRoutePlan.vehicles[0];
@@ -366,7 +346,9 @@ function openAddVehicleModal() {
   vehicleDeparturePicker = flatpickr("#vehicleDepartureTime", {
     enableTime: true,
     dateFormat: "Y-m-d H:i",
-    defaultDate: defaultDeparture.format(JSJoda.DateTimeFormatter.ofPattern('yyyy-M-d HH:mm'))
+    defaultDate: defaultDeparture.format(
+      JSJoda.DateTimeFormatter.ofPattern("yyyy-M-d HH:mm"),
+    ),
   });
 
   $("#addVehicleModal").modal("show");
@@ -379,13 +361,19 @@ function pickVehicleLocationOnMap() {
   $("#addVehicleModal").modal("hide");
 
   // Show hint on map
-  $("#mapHint").html('<i class="fas fa-crosshairs"></i> Click on the map to set vehicle depot location').removeClass("hidden");
+  $("#mapHint")
+    .html(
+      '<i class="fas fa-crosshairs"></i> Click on the map to set vehicle depot location',
+    )
+    .removeClass("hidden");
 }
 
 function setVehicleHomeLocation(lat, lng) {
   $("#vehicleHomeLat").val(lat.toFixed(6));
   $("#vehicleHomeLng").val(lng.toFixed(6));
-  $("#vehicleLocationPreview").html(`<i class="fas fa-check text-success"></i> Location set: ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+  $("#vehicleLocationPreview").html(
+    `<i class="fas fa-check text-success"></i> Location set: ${lat.toFixed(4)}, ${lng.toFixed(4)}`,
+  );
 
   // Show temporary marker
   if (tempVehicleMarker) {
@@ -393,7 +381,7 @@ function setVehicleHomeLocation(lat, lng) {
   }
   tempVehicleMarker = L.marker([lat, lng], {
     icon: L.divIcon({
-      className: 'temp-vehicle-marker',
+      className: "temp-vehicle-marker",
       html: `<div style="
         background-color: #6366f1;
         border: 3px solid white;
@@ -407,8 +395,8 @@ function setVehicleHomeLocation(lat, lng) {
         animation: pulse 1s infinite;
       "><i class="fas fa-warehouse" style="color: white; font-size: 12px;"></i></div>`,
       iconSize: [28, 28],
-      iconAnchor: [14, 14]
-    })
+      iconAnchor: [14, 14],
+    }),
   });
   tempVehicleMarker.addTo(map);
 
@@ -418,16 +406,45 @@ function setVehicleHomeLocation(lat, lng) {
     addingVehicleMode = false;
     $("#addVehicleModal").modal("show");
     // Restore normal map hint
-    $("#mapHint").html('<i class="fas fa-mouse-pointer"></i> Click on the map to add a new visit');
+    $("#mapHint").html(
+      '<i class="fas fa-mouse-pointer"></i> Click on the map to add a new visit',
+    );
   }
 }
 
 // Extended phonetic alphabet for generating vehicle names
-const PHONETIC_NAMES = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliet", "Kilo", "Lima", "Mike", "November", "Oscar", "Papa", "Quebec", "Romeo", "Sierra", "Tango", "Uniform", "Victor", "Whiskey", "X-ray", "Yankee", "Zulu"];
+const PHONETIC_NAMES = [
+  "Alpha",
+  "Bravo",
+  "Charlie",
+  "Delta",
+  "Echo",
+  "Foxtrot",
+  "Golf",
+  "Hotel",
+  "India",
+  "Juliet",
+  "Kilo",
+  "Lima",
+  "Mike",
+  "November",
+  "Oscar",
+  "Papa",
+  "Quebec",
+  "Romeo",
+  "Sierra",
+  "Tango",
+  "Uniform",
+  "Victor",
+  "Whiskey",
+  "X-ray",
+  "Yankee",
+  "Zulu",
+];
 
 function getNextVehicleName() {
   if (!loadedRoutePlan) return "Alpha";
-  const usedNames = new Set(loadedRoutePlan.vehicles.map(v => v.name));
+  const usedNames = new Set(loadedRoutePlan.vehicles.map((v) => v.name));
   for (const name of PHONETIC_NAMES) {
     if (!usedNames.has(name)) return name;
   }
@@ -447,7 +464,9 @@ async function confirmAddVehicle() {
     return;
   }
   if (isNaN(lat) || isNaN(lng)) {
-    alert("Please set a valid home location by clicking on the map or entering coordinates.");
+    alert(
+      "Please set a valid home location by clicking on the map or entering coordinates.",
+    );
     return;
   }
   if (!departureTime) {
@@ -456,13 +475,16 @@ async function confirmAddVehicle() {
   }
 
   // Generate new vehicle ID
-  const maxId = Math.max(...loadedRoutePlan.vehicles.map(v => parseInt(v.id)), 0);
+  const maxId = Math.max(
+    ...loadedRoutePlan.vehicles.map((v) => parseInt(v.id)),
+    0,
+  );
   const newId = String(maxId + 1);
 
   // Format departure time
   const formattedDeparture = JSJoda.LocalDateTime.parse(
     departureTime,
-    JSJoda.DateTimeFormatter.ofPattern('yyyy-M-d HH:mm')
+    JSJoda.DateTimeFormatter.ofPattern("yyyy-M-d HH:mm"),
   ).format(JSJoda.DateTimeFormatter.ISO_LOCAL_DATE_TIME);
 
   // Create new vehicle
@@ -475,7 +497,7 @@ async function confirmAddVehicle() {
     visits: [],
     totalDemand: 0,
     totalDrivingTimeSeconds: 0,
-    arrivalTime: formattedDeparture
+    arrivalTime: formattedDeparture,
   };
 
   // Add to solution
@@ -507,15 +529,20 @@ async function removeLastVehicle() {
     return;
   }
 
-  const lastVehicle = loadedRoutePlan.vehicles[loadedRoutePlan.vehicles.length - 1];
+  const lastVehicle =
+    loadedRoutePlan.vehicles[loadedRoutePlan.vehicles.length - 1];
 
   if (lastVehicle.visits && lastVehicle.visits.length > 0) {
-    if (!confirm(`Vehicle ${lastVehicle.id} has ${lastVehicle.visits.length} assigned visits. These will become unassigned. Continue?`)) {
+    if (
+      !confirm(
+        `Vehicle ${lastVehicle.id} has ${lastVehicle.visits.length} assigned visits. These will become unassigned. Continue?`,
+      )
+    ) {
       return;
     }
     // Unassign visits from the vehicle
-    lastVehicle.visits.forEach(visitId => {
-      const visit = loadedRoutePlan.visits.find(v => v.id === visitId);
+    lastVehicle.visits.forEach((visitId) => {
+      const visit = loadedRoutePlan.visits.find((v) => v.id === visitId);
       if (visit) {
         visit.vehicle = null;
         visit.previousVisit = null;
@@ -540,7 +567,10 @@ async function removeLastVehicle() {
   await renderRoutes(loadedRoutePlan);
   renderTimelines(loadedRoutePlan);
 
-  showNotification(`Vehicle "${lastVehicle.name || lastVehicle.id}" removed.`, "info");
+  showNotification(
+    `Vehicle "${lastVehicle.name || lastVehicle.id}" removed.`,
+    "info",
+  );
 }
 
 async function removeVehicle(vehicleId) {
@@ -549,7 +579,9 @@ async function removeVehicle(vehicleId) {
     return;
   }
 
-  const vehicleIndex = loadedRoutePlan.vehicles.findIndex(v => v.id === vehicleId);
+  const vehicleIndex = loadedRoutePlan.vehicles.findIndex(
+    (v) => v.id === vehicleId,
+  );
   if (vehicleIndex === -1) return;
 
   if (loadedRoutePlan.vehicles.length <= 1) {
@@ -560,12 +592,16 @@ async function removeVehicle(vehicleId) {
   const vehicle = loadedRoutePlan.vehicles[vehicleIndex];
 
   if (vehicle.visits && vehicle.visits.length > 0) {
-    if (!confirm(`Vehicle ${vehicle.id} has ${vehicle.visits.length} assigned visits. These will become unassigned. Continue?`)) {
+    if (
+      !confirm(
+        `Vehicle ${vehicle.id} has ${vehicle.visits.length} assigned visits. These will become unassigned. Continue?`,
+      )
+    ) {
       return;
     }
     // Unassign visits
-    vehicle.visits.forEach(visitId => {
-      const visit = loadedRoutePlan.visits.find(v => v.id === visitId);
+    vehicle.visits.forEach((visitId) => {
+      const visit = loadedRoutePlan.visits.find((v) => v.id === visitId);
       if (visit) {
         visit.vehicle = null;
         visit.previousVisit = null;
@@ -594,8 +630,18 @@ async function removeVehicle(vehicleId) {
 }
 
 function showNotification(message, type = "info") {
-  const alertClass = type === "success" ? "alert-success" : type === "error" ? "alert-danger" : "alert-info";
-  const icon = type === "success" ? "fa-check-circle" : type === "error" ? "fa-exclamation-circle" : "fa-info-circle";
+  const alertClass =
+    type === "success"
+      ? "alert-success"
+      : type === "error"
+        ? "alert-danger"
+        : "alert-info";
+  const icon =
+    type === "success"
+      ? "fa-check-circle"
+      : type === "error"
+        ? "fa-exclamation-circle"
+        : "fa-info-circle";
 
   const notification = $(`
     <div class="alert ${alertClass} alert-dismissible fade show" role="alert" style="min-width: 300px;">
@@ -608,7 +654,7 @@ function showNotification(message, type = "info") {
 
   // Auto-dismiss after 3 seconds
   setTimeout(() => {
-    notification.alert('close');
+    notification.alert("close");
   }, 3000);
 }
 
@@ -626,12 +672,12 @@ function toggleVehicleHighlight(vehicleId) {
 
 function clearRouteHighlight() {
   // Remove number markers
-  routeNumberMarkers.forEach(marker => map.removeLayer(marker));
+  routeNumberMarkers.forEach((marker) => map.removeLayer(marker));
   routeNumberMarkers = [];
 
   // Reset all vehicle icons to normal and restore opacity
   if (loadedRoutePlan) {
-    loadedRoutePlan.vehicles.forEach(vehicle => {
+    loadedRoutePlan.vehicles.forEach((vehicle) => {
       const marker = homeLocationMarkerByIdMap.get(vehicle.id);
       if (marker) {
         marker.setIcon(createVehicleHomeIcon(vehicle, false));
@@ -640,7 +686,7 @@ function clearRouteHighlight() {
     });
 
     // Reset all visit markers to normal and restore opacity
-    loadedRoutePlan.visits.forEach(visit => {
+    loadedRoutePlan.visits.forEach((visit) => {
       const marker = visitMarkerByIdMap.get(visit.id);
       if (marker) {
         const customerType = getCustomerType(visit);
@@ -668,7 +714,7 @@ function highlightVehicleRoute(vehicleId) {
 
   if (!loadedRoutePlan) return;
 
-  const vehicle = loadedRoutePlan.vehicles.find(v => v.id === vehicleId);
+  const vehicle = loadedRoutePlan.vehicles.find((v) => v.id === vehicleId);
   if (!vehicle) return;
 
   const vehicleColor = colorByVehicle(vehicle);
@@ -680,7 +726,7 @@ function highlightVehicleRoute(vehicleId) {
   }
 
   // Dim other vehicles
-  loadedRoutePlan.vehicles.forEach(v => {
+  loadedRoutePlan.vehicles.forEach((v) => {
     if (v.id !== vehicleId) {
       const marker = homeLocationMarkerByIdMap.get(v.id);
       if (marker) {
@@ -691,23 +737,27 @@ function highlightVehicleRoute(vehicleId) {
   });
 
   // Get visit order for this vehicle
-  const visitByIdMap = new Map(loadedRoutePlan.visits.map(v => [v.id, v]));
-  const vehicleVisits = vehicle.visits.map(visitId => visitByIdMap.get(visitId)).filter(v => v);
+  const visitByIdMap = new Map(loadedRoutePlan.visits.map((v) => [v.id, v]));
+  const vehicleVisits = vehicle.visits
+    .map((visitId) => visitByIdMap.get(visitId))
+    .filter((v) => v);
 
   // Highlight and number the visits on this route
   let stopNumber = 1;
-  vehicleVisits.forEach(visit => {
+  vehicleVisits.forEach((visit) => {
     const marker = visitMarkerByIdMap.get(visit.id);
     if (marker) {
       const customerType = getCustomerType(visit);
-      marker.setIcon(createCustomerTypeIcon(customerType, true, true, vehicleColor));
+      marker.setIcon(
+        createCustomerTypeIcon(customerType, true, true, vehicleColor),
+      );
       marker.setOpacity(1);
 
       // Add number marker
       const numberMarker = L.marker(visit.location, {
         icon: createRouteNumberIcon(stopNumber, vehicleColor),
         interactive: false,
-        zIndexOffset: 1000
+        zIndexOffset: 1000,
       });
       numberMarker.addTo(map);
       routeNumberMarkers.push(numberMarker);
@@ -716,7 +766,7 @@ function highlightVehicleRoute(vehicleId) {
   });
 
   // Dim visits not on this route
-  loadedRoutePlan.visits.forEach(visit => {
+  loadedRoutePlan.visits.forEach((visit) => {
     if (!vehicle.visits.includes(visit.id)) {
       const marker = visitMarkerByIdMap.get(visit.id);
       if (marker) {
@@ -736,7 +786,7 @@ function highlightVehicleRoute(vehicleId) {
   const startMarker = L.marker(vehicle.homeLocation, {
     icon: createRouteNumberIcon("S", vehicleColor),
     interactive: false,
-    zIndexOffset: 1000
+    zIndexOffset: 1000,
   });
   startMarker.addTo(map);
   routeNumberMarkers.push(startMarker);
@@ -744,7 +794,7 @@ function highlightVehicleRoute(vehicleId) {
 
 function createRouteNumberIcon(number, color) {
   return L.divIcon({
-    className: 'route-number-marker',
+    className: "route-number-marker",
     html: `<div style="
       background-color: ${color};
       color: white;
@@ -762,7 +812,7 @@ function createRouteNumberIcon(number, color) {
       margin-top: -28px;
     ">${number}</div>`,
     iconSize: [22, 22],
-    iconAnchor: [0, 0]
+    iconAnchor: [0, 0],
   });
 }
 
@@ -771,46 +821,55 @@ async function renderRouteLines(highlightedId = null) {
 
   if (!loadedRoutePlan) return;
 
-  // Fetch geometries during solving (routes change)
-  if (scheduleId) {
-    routeGeometries = await fetchRouteGeometries();
-  }
-
-  const visitByIdMap = new Map(loadedRoutePlan.visits.map(visit => [visit.id, visit]));
+  const visitByIdMap = new Map(
+    loadedRoutePlan.visits.map((visit) => [visit.id, visit]),
+  );
 
   for (let vehicle of loadedRoutePlan.vehicles) {
     const homeLocation = vehicle.homeLocation;
-    const locations = vehicle.visits.map(visitId => visitByIdMap.get(visitId)?.location).filter(l => l);
+    const homeLocationIdx = vehicle.homeLocationIdx;
 
-    const isHighlighted = highlightedId === null || vehicle.id === highlightedId;
+    const isHighlighted =
+      highlightedId === null || vehicle.id === highlightedId;
     const color = colorByVehicle(vehicle);
     const weight = isHighlighted && highlightedId !== null ? 5 : 3;
     const opacity = isHighlighted ? 1 : 0.2;
 
-    const vehicleGeometry = routeGeometries?.[vehicle.id];
+    // Get visits for this vehicle with their location indices
+    const vehicleVisits = vehicle.visits
+      .map((visitId) => visitByIdMap.get(visitId))
+      .filter((v) => v);
 
-    if (vehicleGeometry && vehicleGeometry.length > 0) {
-      // Draw real road routes using decoded polylines
-      for (const encodedSegment of vehicleGeometry) {
-        if (encodedSegment) {
-          const points = decodePolyline(encodedSegment);
-          if (points.length > 0) {
-            L.polyline(points, {
-              color: color,
-              weight: weight,
-              opacity: opacity
-            }).addTo(routeGroup);
-          }
+    if (vehicleVisits.length === 0) continue;
+
+    // Build route segments: home -> visit1 -> visit2 -> ... -> home
+    let prevIdx = homeLocationIdx;
+    for (const visit of vehicleVisits) {
+      const key = `${prevIdx}-${visit.locationIdx}`;
+      const polyline = rawGeometries?.[key];
+
+      if (polyline) {
+        const points = decodePolyline(polyline);
+        if (points.length > 0) {
+          L.polyline(points, { color, weight, opacity }).addTo(routeGroup);
         }
       }
-    } else if (locations.length > 0) {
-      // Fallback to straight lines if no geometry available
-      L.polyline([homeLocation, ...locations, homeLocation], {
-        color: color,
-        weight: weight,
-        opacity: opacity
-      }).addTo(routeGroup);
+      // No fallback - if no geometry, don't draw anything
+      prevIdx = visit.locationIdx;
     }
+
+    // Return to home
+    const lastVisit = vehicleVisits[vehicleVisits.length - 1];
+    const returnKey = `${lastVisit.locationIdx}-${homeLocationIdx}`;
+    const returnPolyline = rawGeometries?.[returnKey];
+
+    if (returnPolyline) {
+      const points = decodePolyline(returnPolyline);
+      if (points.length > 0) {
+        L.polyline(points, { color, weight, opacity }).addTo(routeGroup);
+      }
+    }
+    // No fallback - if no geometry, don't draw anything
   }
 }
 
@@ -820,9 +879,33 @@ function colorByVehicle(vehicle) {
 
 // Customer type definitions matching demo_data.py
 const CUSTOMER_TYPES = {
-  RESTAURANT: { label: "Restaurant", icon: "fa-utensils", color: "#f59e0b", windowStart: "06:00", windowEnd: "10:00", minService: 20, maxService: 40 },
-  BUSINESS: { label: "Business", icon: "fa-building", color: "#3b82f6", windowStart: "09:00", windowEnd: "17:00", minService: 15, maxService: 30 },
-  RESIDENTIAL: { label: "Residential", icon: "fa-home", color: "#10b981", windowStart: "17:00", windowEnd: "20:00", minService: 5, maxService: 10 },
+  RESTAURANT: {
+    label: "Restaurant",
+    icon: "fa-utensils",
+    color: "#f59e0b",
+    windowStart: "06:00",
+    windowEnd: "10:00",
+    minService: 20,
+    maxService: 40,
+  },
+  BUSINESS: {
+    label: "Business",
+    icon: "fa-building",
+    color: "#3b82f6",
+    windowStart: "09:00",
+    windowEnd: "17:00",
+    minService: 15,
+    maxService: 30,
+  },
+  RESIDENTIAL: {
+    label: "Residential",
+    icon: "fa-home",
+    color: "#10b981",
+    windowStart: "17:00",
+    windowEnd: "20:00",
+    minService: 5,
+    maxService: 10,
+  },
 };
 
 function getCustomerType(visit) {
@@ -834,7 +917,14 @@ function getCustomerType(visit) {
       return { type, ...config };
     }
   }
-  return { type: "UNKNOWN", label: "Custom", icon: "fa-question", color: "#6b7280", windowStart: startTime, windowEnd: endTime };
+  return {
+    type: "UNKNOWN",
+    label: "Custom",
+    icon: "fa-question",
+    color: "#6b7280",
+    windowStart: startTime,
+    windowEnd: endTime,
+  };
 }
 
 function formatDrivingTime(drivingTimeInSeconds) {
@@ -879,10 +969,10 @@ function createVehicleHomeIcon(vehicle, isHighlighted = false) {
   const borderWidth = isHighlighted ? 4 : 3;
   const shadow = isHighlighted
     ? `0 0 0 4px ${color}40, 0 4px 8px rgba(0,0,0,0.5)`
-    : '0 2px 4px rgba(0,0,0,0.4)';
+    : "0 2px 4px rgba(0,0,0,0.4)";
 
   return L.divIcon({
-    className: 'vehicle-home-marker',
+    className: "vehicle-home-marker",
     html: `<div style="
       background-color: ${color};
       border: ${borderWidth}px solid white;
@@ -896,8 +986,8 @@ function createVehicleHomeIcon(vehicle, isHighlighted = false) {
       transition: all 0.2s ease;
     "><i class="fas fa-truck" style="color: white; font-size: ${fontSize}px;"></i></div>`,
     iconSize: [size, size],
-    iconAnchor: [size/2, size/2],
-    popupAnchor: [0, -size/2]
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -size / 2],
   });
 }
 
@@ -908,26 +998,34 @@ function getHomeLocationMarker(vehicle) {
     return marker;
   }
   marker = L.marker(vehicle.homeLocation, {
-    icon: createVehicleHomeIcon(vehicle)
+    icon: createVehicleHomeIcon(vehicle),
   });
   marker.addTo(homeLocationGroup).bindPopup();
   homeLocationMarkerByIdMap.set(vehicle.id, marker);
   return marker;
 }
 
-function createCustomerTypeIcon(customerType, isAssigned = false, isHighlighted = false, highlightColor = null) {
-  const borderColor = isHighlighted && highlightColor
-    ? highlightColor
-    : (isAssigned ? customerType.color : '#6b7280');
+function createCustomerTypeIcon(
+  customerType,
+  isAssigned = false,
+  isHighlighted = false,
+  highlightColor = null,
+) {
+  const borderColor =
+    isHighlighted && highlightColor
+      ? highlightColor
+      : isAssigned
+        ? customerType.color
+        : "#6b7280";
   const size = isHighlighted ? 38 : 32;
   const fontSize = isHighlighted ? 16 : 14;
   const borderWidth = isHighlighted ? 4 : 3;
   const shadow = isHighlighted
     ? `0 0 0 4px ${highlightColor}40, 0 4px 8px rgba(0,0,0,0.4)`
-    : '0 2px 4px rgba(0,0,0,0.3)';
+    : "0 2px 4px rgba(0,0,0,0.3)";
 
   return L.divIcon({
-    className: 'customer-marker',
+    className: "customer-marker",
     html: `<div style="
       background-color: white;
       border: ${borderWidth}px solid ${borderColor};
@@ -941,8 +1039,8 @@ function createCustomerTypeIcon(customerType, isAssigned = false, isHighlighted 
       transition: all 0.2s ease;
     "><i class="fas ${customerType.icon}" style="color: ${customerType.color}; font-size: ${fontSize}px;"></i></div>`,
     iconSize: [size, size],
-    iconAnchor: [size/2, size/2],
-    popupAnchor: [0, -size/2]
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -size / 2],
   });
 }
 
@@ -958,7 +1056,7 @@ function getVisitMarker(visit) {
   }
 
   marker = L.marker(visit.location, {
-    icon: createCustomerTypeIcon(customerType, isAssigned)
+    icon: createCustomerTypeIcon(customerType, isAssigned),
   });
   marker.addTo(visitGroup).bindPopup();
   visitMarkerByIdMap.set(visit.id, marker);
@@ -981,15 +1079,15 @@ async function renderRoutes(solution) {
     const percentage = Math.min((totalDemand / capacity) * 100, 100);
     const overCapacity = totalDemand > capacity;
     const color = colorByVehicle(vehicle);
-    const progressBarColor = overCapacity ? 'bg-danger' : '';
+    const progressBarColor = overCapacity ? "bg-danger" : "";
     const isHighlighted = highlightedVehicleId === id;
     const visitCount = vehicle.visits ? vehicle.visits.length : 0;
     const vehicleName = vehicle.name || `Vehicle ${id}`;
 
     vehiclesTable.append(`
-      <tr id="vehicle-row-${id}" class="vehicle-row ${isHighlighted ? 'table-active' : ''}" style="cursor: pointer;">
+      <tr id="vehicle-row-${id}" class="vehicle-row ${isHighlighted ? "table-active" : ""}" style="cursor: pointer;">
         <td onclick="toggleVehicleHighlight('${id}')">
-          <div style="background-color: ${color}; width: 1.5rem; height: 1.5rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; ${isHighlighted ? 'box-shadow: 0 0 0 3px ' + color + '40;' : ''}">
+          <div style="background-color: ${color}; width: 1.5rem; height: 1.5rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; ${isHighlighted ? "box-shadow: 0 0 0 3px " + color + "40;" : ""}">
             <i class="fas fa-truck" style="color: white; font-size: 0.65rem;"></i>
           </div>
         </td>
@@ -999,7 +1097,7 @@ async function renderRoutes(solution) {
         </td>
         <td onclick="toggleVehicleHighlight('${id}')">
           <div class="progress" style="height: 18px;" data-bs-toggle="tooltip" data-bs-placement="left"
-            title="Cargo: ${totalDemand} / Capacity: ${capacity}${overCapacity ? ' (OVER CAPACITY!)' : ''}">
+            title="Cargo: ${totalDemand} / Capacity: ${capacity}${overCapacity ? " (OVER CAPACITY!)" : ""}">
             <div class="progress-bar ${progressBarColor}" role="progressbar" style="width: ${percentage}%; font-size: 0.7rem; transition: width 0.3s ease;">
               ${totalDemand}/${capacity}
             </div>
@@ -1009,9 +1107,13 @@ async function renderRoutes(solution) {
           ${formatDrivingTime(totalDrivingTimeSeconds)}
         </td>
         <td>
-          ${canRemove ? `<button class="btn btn-sm btn-outline-danger p-0 px-1" onclick="event.stopPropagation(); removeVehicle('${id}')" title="Remove vehicle ${vehicleName}">
+          ${
+            canRemove
+              ? `<button class="btn btn-sm btn-outline-danger p-0 px-1" onclick="event.stopPropagation(); removeVehicle('${id}')" title="Remove vehicle ${vehicleName}">
             <i class="fas fa-times" style="font-size: 0.7rem;"></i>
-          </button>` : ''}
+          </button>`
+              : ""
+          }
         </td>
       </tr>`);
   });
@@ -1034,12 +1136,12 @@ function renderTimelines(routePlan) {
   byVisitItemData.clear();
 
   // Build lookup maps for O(1) access
-  const vehicleById = new Map(routePlan.vehicles.map(v => [v.id, v]));
-  const visitById = new Map(routePlan.visits.map(v => [v.id, v]));
+  const vehicleById = new Map(routePlan.vehicles.map((v) => [v.id, v]));
+  const visitById = new Map(routePlan.visits.map((v) => [v.id, v]));
   const visitOrderMap = new Map();
 
   // Build stop order for each visit
-  routePlan.vehicles.forEach(vehicle => {
+  routePlan.vehicles.forEach((vehicle) => {
     vehicle.visits.forEach((visitId, index) => {
       visitOrderMap.set(visitId, index + 1);
     });
@@ -1053,21 +1155,24 @@ function renderTimelines(routePlan) {
     const overCapacity = totalDemand > capacity;
 
     // Count late visits for this vehicle
-    const vehicleVisits = vehicle.visits.map(id => visitById.get(id)).filter(v => v);
-    const lateCount = vehicleVisits.filter(v => {
+    const vehicleVisits = vehicle.visits
+      .map((id) => visitById.get(id))
+      .filter((v) => v);
+    const lateCount = vehicleVisits.filter((v) => {
       if (!v.departureTime) return false;
       const departure = JSJoda.LocalDateTime.parse(v.departureTime);
       const maxEnd = JSJoda.LocalDateTime.parse(v.maxEndTime);
       return departure.isAfter(maxEnd);
     }).length;
 
-    const statusIcon = lateCount > 0
-      ? `<i class="fas fa-exclamation-triangle timeline-status-late timeline-status-icon" title="${lateCount} late"></i>`
-      : vehicle.visits.length > 0
-        ? `<i class="fas fa-check-circle timeline-status-ontime timeline-status-icon" title="All on-time"></i>`
-        : '';
+    const statusIcon =
+      lateCount > 0
+        ? `<i class="fas fa-exclamation-triangle timeline-status-late timeline-status-icon" title="${lateCount} late"></i>`
+        : vehicle.visits.length > 0
+          ? `<i class="fas fa-check-circle timeline-status-ontime timeline-status-icon" title="All on-time"></i>`
+          : "";
 
-    const progressBarClass = overCapacity ? 'bg-danger' : '';
+    const progressBarClass = overCapacity ? "bg-danger" : "";
 
     const vehicleWithLoad = `
       <h5 class="card-title mb-1">${vehicleName}${statusIcon}</h5>
@@ -1086,13 +1191,13 @@ function renderTimelines(routePlan) {
     const customerType = getCustomerType(visit);
     const stopNumber = visitOrderMap.get(visit.id);
 
-    const visitGroupElement = $(`<div/>`).append(
-      $(`<h5 class="card-title mb-1"/>`).html(
-        `<i class="fas ${customerType.icon}" style="color: ${customerType.color}"></i> ${visit.name}`
-      ),
-    ).append(
-      $(`<small class="text-muted"/>`).text(customerType.label)
-    );
+    const visitGroupElement = $(`<div/>`)
+      .append(
+        $(`<h5 class="card-title mb-1"/>`).html(
+          `<i class="fas ${customerType.icon}" style="color: ${customerType.color}"></i> ${visit.name}`,
+        ),
+      )
+      .append($(`<small class="text-muted"/>`).text(customerType.label));
     byVisitGroupData.add({
       id: visit.id,
       content: visitGroupElement.html(),
@@ -1110,7 +1215,9 @@ function renderTimelines(routePlan) {
 
     if (visit.vehicle == null) {
       const byJobJobElement = $(`<div/>`).append(
-        $(`<span/>`).html(`<i class="fas fa-exclamation-circle text-danger me-1"></i>Unassigned`),
+        $(`<span/>`).html(
+          `<i class="fas fa-exclamation-circle text-danger me-1"></i>Unassigned`,
+        ),
       );
 
       // Unassigned are shown at the beginning of the visit's time window; the length is the service duration.
@@ -1130,30 +1237,34 @@ function renderTimelines(routePlan) {
 
       // Get vehicle info for display
       const vehicleInfo = vehicleById.get(visit.vehicle);
-      const vehicleName = vehicleInfo ? (vehicleInfo.name || `Vehicle ${visit.vehicle}`) : `Vehicle ${visit.vehicle}`;
+      const vehicleName = vehicleInfo
+        ? vehicleInfo.name || `Vehicle ${visit.vehicle}`
+        : `Vehicle ${visit.vehicle}`;
 
       // Stop badge for service segment
-      const stopBadge = stopNumber ? `<span class="timeline-stop-badge">${stopNumber}</span>` : '';
+      const stopBadge = stopNumber
+        ? `<span class="timeline-stop-badge">${stopNumber}</span>`
+        : "";
 
       // Status icon based on timing
       const statusIcon = afterDue
         ? `<i class="fas fa-exclamation-triangle timeline-status-late timeline-status-icon" title="Late"></i>`
         : `<i class="fas fa-check timeline-status-ontime timeline-status-icon" title="On-time"></i>`;
 
-      const byVehicleElement = $(`<div/>`)
-        .append($(`<span/>`).html(
-          `${stopBadge}<i class="fas ${customerType.icon}" style="color: ${customerType.color}"></i> ${visit.name}${statusIcon}`
-        ));
+      const byVehicleElement = $(`<div/>`).append(
+        $(`<span/>`).html(
+          `${stopBadge}<i class="fas ${customerType.icon}" style="color: ${customerType.color}"></i> ${visit.name}${statusIcon}`,
+        ),
+      );
 
-      const byVisitElement = $(`<div/>`)
-        .append(
-          $(`<span/>`).html(
-            `${stopBadge}${vehicleName}${statusIcon}`
-          ),
-        );
+      const byVisitElement = $(`<div/>`).append(
+        $(`<span/>`).html(`${stopBadge}${vehicleName}${statusIcon}`),
+      );
 
       const byVehicleTravelElement = $(`<div/>`).append(
-        $(`<span/>`).html(`<i class="fas fa-route text-warning me-1"></i>Travel`),
+        $(`<span/>`).html(
+          `<i class="fas fa-route text-warning me-1"></i>Travel`,
+        ),
       );
 
       const previousDeparture = arrivalTime.minusSeconds(
@@ -1171,7 +1282,9 @@ function renderTimelines(routePlan) {
 
       if (beforeReady) {
         const byVehicleWaitElement = $(`<div/>`).append(
-          $(`<span/>`).html(`<i class="fas fa-clock timeline-status-early me-1"></i>Wait`),
+          $(`<span/>`).html(
+            `<i class="fas fa-clock timeline-status-early me-1"></i>Wait`,
+          ),
         );
 
         byVehicleItemData.add({
@@ -1220,7 +1333,11 @@ function renderTimelines(routePlan) {
           group: vehicle.id,
           subgroup: vehicle.id,
           content: $(`<div/>`)
-            .append($(`<span/>`).html(`<i class="fas fa-home text-secondary me-1"></i>Return`))
+            .append(
+              $(`<span/>`).html(
+                `<i class="fas fa-home text-secondary me-1"></i>Return`,
+              ),
+            )
             .html(),
           start: lastVisit.departureTime,
           end: vehicle.arrivalTime,
@@ -1249,7 +1366,7 @@ function analyze() {
 }
 
 function openRecommendationModal(lat, lng) {
-  if (!('score' in loadedRoutePlan) || optimizing) {
+  if (!("score" in loadedRoutePlan) || optimizing) {
     map.removeLayer(visitMarker);
     visitMarker = null;
     let message = "Please click the Solve button before adding new visits.";
@@ -1260,43 +1377,55 @@ function openRecommendationModal(lat, lng) {
     return;
   }
   // see recommended-fit.js
-  const visitId = Math.max(...loadedRoutePlan.visits.map(c => parseInt(c.id))) + 1;
-  newVisit = {id: visitId, location: [lat, lng]};
+  const visitId =
+    Math.max(...loadedRoutePlan.visits.map((c) => parseInt(c.id))) + 1;
+  newVisit = { id: visitId, location: [lat, lng] };
   addNewVisit(visitId, lat, lng, map, visitMarker);
 }
 
 function getRecommendationsModal() {
   let formValid = true;
-  formValid = validateFormField(newVisit, 'name', '#inputName') && formValid;
-  formValid = validateFormField(newVisit, 'demand', '#inputDemand') && formValid;
-  formValid = validateFormField(newVisit, 'minStartTime', '#inputMinStartTime') && formValid;
-  formValid = validateFormField(newVisit, 'maxEndTime', '#inputMaxStartTime') && formValid;
-  formValid = validateFormField(newVisit, 'serviceDuration', '#inputDuration') && formValid;
+  formValid = validateFormField(newVisit, "name", "#inputName") && formValid;
+  formValid =
+    validateFormField(newVisit, "demand", "#inputDemand") && formValid;
+  formValid =
+    validateFormField(newVisit, "minStartTime", "#inputMinStartTime") &&
+    formValid;
+  formValid =
+    validateFormField(newVisit, "maxEndTime", "#inputMaxStartTime") &&
+    formValid;
+  formValid =
+    validateFormField(newVisit, "serviceDuration", "#inputDuration") &&
+    formValid;
 
   if (formValid) {
     const updatedMinStartTime = JSJoda.LocalDateTime.parse(
-      newVisit['minStartTime'],
-      JSJoda.DateTimeFormatter.ofPattern('yyyy-M-d HH:mm')
+      newVisit["minStartTime"],
+      JSJoda.DateTimeFormatter.ofPattern("yyyy-M-d HH:mm"),
     ).format(JSJoda.DateTimeFormatter.ISO_LOCAL_DATE_TIME);
 
     const updatedMaxEndTime = JSJoda.LocalDateTime.parse(
-      newVisit['maxEndTime'],
-      JSJoda.DateTimeFormatter.ofPattern('yyyy-M-d HH:mm')
+      newVisit["maxEndTime"],
+      JSJoda.DateTimeFormatter.ofPattern("yyyy-M-d HH:mm"),
     ).format(JSJoda.DateTimeFormatter.ISO_LOCAL_DATE_TIME);
 
     const updatedVisit = {
       ...newVisit,
-      serviceDuration: parseInt(newVisit['serviceDuration']) * 60, // Convert minutes to seconds
+      serviceDuration: parseInt(newVisit["serviceDuration"]) * 60, // Convert minutes to seconds
       minStartTime: updatedMinStartTime,
-      maxEndTime: updatedMaxEndTime
+      maxEndTime: updatedMaxEndTime,
     };
 
-    let updatedVisitList = [...loadedRoutePlan['visits']];
+    let updatedVisitList = [...loadedRoutePlan["visits"]];
     updatedVisitList.push(updatedVisit);
-    let updatedSolution = {...loadedRoutePlan, visits: updatedVisitList};
+    let updatedSolution = { ...loadedRoutePlan, visits: updatedVisitList };
 
     // see recommended-fit.js
-    requestRecommendations(updatedVisit.id, updatedSolution, "/route-plans/recommendation");
+    requestRecommendations(
+      updatedVisit.id,
+      updatedSolution,
+      "/route-plans/recommendation",
+    );
   }
 }
 
@@ -1313,7 +1442,7 @@ function validateFormField(target, fieldName, inputName) {
 function applyRecommendationModal(recommendations) {
   let checkedRecommendation = null;
   recommendations.forEach((recommendation, index) => {
-    if ($('#option' + index).is(":checked")) {
+    if ($("#option" + index).is(":checked")) {
       checkedRecommendation = recommendations[index];
     }
   });
@@ -1324,25 +1453,25 @@ function applyRecommendationModal(recommendations) {
   }
 
   const updatedMinStartTime = JSJoda.LocalDateTime.parse(
-    newVisit['minStartTime'],
-    JSJoda.DateTimeFormatter.ofPattern('yyyy-M-d HH:mm')
+    newVisit["minStartTime"],
+    JSJoda.DateTimeFormatter.ofPattern("yyyy-M-d HH:mm"),
   ).format(JSJoda.DateTimeFormatter.ISO_LOCAL_DATE_TIME);
 
   const updatedMaxEndTime = JSJoda.LocalDateTime.parse(
-    newVisit['maxEndTime'],
-    JSJoda.DateTimeFormatter.ofPattern('yyyy-M-d HH:mm')
+    newVisit["maxEndTime"],
+    JSJoda.DateTimeFormatter.ofPattern("yyyy-M-d HH:mm"),
   ).format(JSJoda.DateTimeFormatter.ISO_LOCAL_DATE_TIME);
 
   const updatedVisit = {
     ...newVisit,
-    serviceDuration: parseInt(newVisit['serviceDuration']) * 60, // Convert minutes to seconds
+    serviceDuration: parseInt(newVisit["serviceDuration"]) * 60, // Convert minutes to seconds
     minStartTime: updatedMinStartTime,
-    maxEndTime: updatedMaxEndTime
+    maxEndTime: updatedMaxEndTime,
   };
 
-  let updatedVisitList = [...loadedRoutePlan['visits']];
+  let updatedVisitList = [...loadedRoutePlan["visits"]];
   updatedVisitList.push(updatedVisit);
-  let updatedSolution = {...loadedRoutePlan, visits: updatedVisitList};
+  let updatedSolution = { ...loadedRoutePlan, visits: updatedVisitList };
 
   // see recommended-fit.js
   applyRecommendation(
@@ -1350,7 +1479,7 @@ function applyRecommendationModal(recommendations) {
     newVisit.id,
     checkedRecommendation.proposition.vehicleId,
     checkedRecommendation.proposition.index,
-    "/route-plans/recommendation/apply"
+    "/route-plans/recommendation/apply",
   );
 }
 
@@ -1358,7 +1487,7 @@ async function updateSolutionWithNewVisit(newSolution) {
   loadedRoutePlan = newSolution;
   await renderRoutes(newSolution);
   renderTimelines(newSolution);
-  $('#newVisitModal').modal('hide');
+  $("#newVisitModal").modal("hide");
 }
 
 // TODO: move the general functionality to the webjar.
@@ -1390,30 +1519,109 @@ function setupAjax() {
   });
 }
 
-function solve() {
-  // Clear geometry cache - will be refreshed when solution updates
-  routeGeometries = null;
+/**
+ * Start solving via SSE stream.
+ * Routes update in real-time on the map as the solver finds better solutions.
+ */
+async function solve() {
+  // Set up abort controller for stopping
+  solveAbortController = new AbortController();
 
-  // Disable button immediately to prevent double-clicks
-  $("#solveButton").prop("disabled", true).addClass("disabled");
+  // Update UI to solving state
+  refreshSolvingButtons(true);
 
-  $.ajax({
-    url: "/route-plans",
-    type: "POST",
-    data: JSON.stringify(loadedRoutePlan),
-    contentType: "application/json",
-    dataType: "text",
-    success: function (data) {
-      scheduleId = data.replace(/"/g, ""); // Remove quotes from UUID
-      $("#solveButton").prop("disabled", false).removeClass("disabled");
-      refreshSolvingButtons(true);
-    },
-    error: function (xhr, ajaxOptions, thrownError) {
-      showError("Start solving failed.", xhr);
-      $("#solveButton").prop("disabled", false).removeClass("disabled");
-      refreshSolvingButtons(false);
-    },
-  });
+  // Always use haversine for solving (fast). Real road geometries are kept cached.
+  const routingMode = "haversine";
+
+  try {
+    const response = await fetch(`/route-plans?routing=${routingMode}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(loadedRoutePlan),
+      signal: solveAbortController.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n\n");
+      buffer = lines.pop(); // Keep incomplete chunk
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            await handleSolveEvent(data);
+          } catch (e) {
+            console.warn("Failed to parse SSE event:", e, line);
+          }
+        }
+      }
+    }
+
+    // Stream ended normally (solver finished)
+    onSolveComplete();
+  } catch (error) {
+    if (error.name === "AbortError") {
+      // User clicked stop - this is expected
+      onSolveComplete();
+    } else {
+      console.error("Solve failed:", error);
+      onSolveError(error);
+    }
+  }
+}
+
+/**
+ * Handle incoming SSE events during solving.
+ */
+async function handleSolveEvent(data) {
+  if (data.event === "solution") {
+    // Update the loaded plan with new solution
+    loadedRoutePlan = data.solution;
+
+    // Keep using cached real road geometries if available (don't overwrite)
+
+    // Render the updated solution
+    await renderRoutes(loadedRoutePlan);
+    renderTimelines(loadedRoutePlan);
+
+    // Update score display
+    $("#score").text(`Score: ${data.score}`);
+  } else if (data.event === "complete") {
+    onSolveComplete();
+  } else if (data.event === "error") {
+    onSolveError(new Error(data.message));
+  }
+}
+
+/**
+ * Called when solving completes (either normally or via stop).
+ */
+function onSolveComplete() {
+  hideLoadingOverlay();
+  solveAbortController = null;
+  refreshSolvingButtons(false);
+}
+
+/**
+ * Called when solving fails with an error.
+ */
+function onSolveError(error) {
+  hideLoadingOverlay();
+  solveAbortController = null;
+  refreshSolvingButtons(false);
+  showSimpleError("Solving failed: " + error.message);
 }
 
 function refreshSolvingButtons(solving) {
@@ -1424,83 +1632,77 @@ function refreshSolvingButtons(solving) {
     $("#stopSolvingButton").show();
     $("#solvingSpinner").addClass("active");
     $("#mapHint").addClass("hidden");
-    if (autoRefreshIntervalId == null) {
-      autoRefreshIntervalId = setInterval(refreshRoutePlan, 2000);
-    }
   } else {
     $("#solveButton").show();
     $("#visitButton").show();
     $("#stopSolvingButton").hide();
     $("#solvingSpinner").removeClass("active");
     $("#mapHint").removeClass("hidden");
-    if (autoRefreshIntervalId != null) {
-      clearInterval(autoRefreshIntervalId);
-      autoRefreshIntervalId = null;
-    }
   }
 }
 
-async function refreshRoutePlan() {
-  let path = "/route-plans/" + scheduleId;
-  let isLoadingDemoData = scheduleId === null;
-
-  if (isLoadingDemoData) {
-    if (demoDataId === null) {
-      alert("Please select a test data set.");
-      return;
-    }
-
-    // Clear geometry cache when loading new demo data
-    routeGeometries = null;
-
-    try {
-      let routePlan;
-      if (useRealRoads) {
-        // Use SSE streaming for real roads to show progress
-        routePlan = await loadDemoDataWithProgress(demoDataId);
-      } else {
-        // Use simple GET for haversine (instant, no loading overlay)
-        routePlan = await $.getJSON(`/demo-data/${demoDataId}`);
-      }
-      loadedRoutePlan = routePlan;
-      refreshSolvingButtons(
-        routePlan.solverStatus != null &&
-          routePlan.solverStatus !== "NOT_SOLVING",
-      );
-      await renderRoutes(routePlan);
-      renderTimelines(routePlan);
-      initialized = true;
-    } catch (error) {
-      showError("Getting demo data has failed: " + error.message, {});
-      refreshSolvingButtons(false);
-    }
+/**
+ * Load demo data (called on initial page load and when switching datasets).
+ */
+async function loadDemoData() {
+  if (demoDataId === null) {
+    alert("Please select a test data set.");
     return;
   }
 
-  // Loading existing route plan (during solving)
+  // Clear geometry cache when loading new demo data
+  rawGeometries = null;
+
   try {
-    const routePlan = await $.getJSON(path);
+    let routePlan;
+    if (useRealRoads) {
+      // Use SSE streaming for real roads to show progress
+      routePlan = await loadDemoDataWithProgress(demoDataId);
+    } else {
+      // Use simple GET for haversine (instant, no loading overlay)
+      routePlan = await $.getJSON(`/demo-data/${demoDataId}`);
+    }
     loadedRoutePlan = routePlan;
-    refreshSolvingButtons(
-      routePlan.solverStatus != null &&
-        routePlan.solverStatus !== "NOT_SOLVING",
-    );
     await renderRoutes(routePlan);
     renderTimelines(routePlan);
     initialized = true;
   } catch (error) {
-    showError("Getting route plan has failed.", error);
-    refreshSolvingButtons(false);
+    // Handle error - show user-friendly message and fall back to haversine
+    console.error("Demo data loading failed:", error);
+    showSimpleError(
+      "Road network loading failed: " +
+        error.message +
+        ". Falling back to straight-line routing.",
+    );
+
+    // Disable real roads toggle and reload with haversine
+    useRealRoads = false;
+    $("#realRoadRouting").prop("checked", false);
+
+    try {
+      const routePlan = await $.getJSON(`/demo-data/${demoDataId}`);
+      loadedRoutePlan = routePlan;
+      await renderRoutes(routePlan);
+      renderTimelines(routePlan);
+      initialized = true;
+    } catch (fallbackError) {
+      showSimpleError(
+        "Failed to load demo data: " +
+          (fallbackError.message || "Unknown error"),
+      );
+    }
   }
 }
 
+/**
+ * Stop solving by aborting the SSE connection.
+ * The backend detects the closed connection and stops the solver automatically.
+ */
 function stopSolving() {
-  $.delete("/route-plans/" + scheduleId, function () {
-    refreshSolvingButtons(false);
-    refreshRoutePlan();
-  }).fail(function (xhr, ajaxOptions, thrownError) {
-    showError("Stop solving failed.", xhr);
-  });
+  if (solveAbortController) {
+    solveAbortController.abort();
+    // onSolveComplete() will be called from the catch block in solve()
+  }
 }
 
 function fetchDemoData() {
@@ -1518,21 +1720,20 @@ function fetchDemoData() {
 
       $("#" + item + "TestData").click(function () {
         switchDataDropDownItemActive(item);
-        scheduleId = null;
         demoDataId = item;
         initialized = false;
         homeLocationGroup.clearLayers();
         homeLocationMarkerByIdMap.clear();
         visitGroup.clearLayers();
         visitMarkerByIdMap.clear();
-        refreshRoutePlan();
+        loadDemoData();
       });
     });
 
     demoDataId = data[0];
     switchDataDropDownItemActive(demoDataId);
 
-    refreshRoutePlan();
+    loadDemoData();
   }).fail(function (xhr, ajaxOptions, thrownError) {
     // disable this page as there is no data
     $("#demo").empty();
@@ -1589,7 +1790,7 @@ function replaceQuickstartSolverForgeAutoHeaderFooter() {
           </div>
           <div class="ms-auto d-flex align-items-center gap-3">
               <div class="form-check form-switch d-flex align-items-center" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Enable real road routing using OpenStreetMap data. Slower initial load (~5-15s for download), but shows accurate road routes instead of straight lines.">
-                  <input class="form-check-input" type="checkbox" id="realRoadRouting" checked style="width: 2.5em; height: 1.25em; cursor: pointer;">
+                  <input class="form-check-input" type="checkbox" id="realRoadRouting" style="width: 2.5em; height: 1.25em; cursor: pointer;">
                   <label class="form-check-label ms-2" for="realRoadRouting" style="white-space: nowrap; cursor: pointer;">
                       <i class="fas fa-road"></i> Real Roads
                   </label>

@@ -31,22 +31,18 @@ pub struct Visit {
     #[serde(rename = "serviceDuration")]
     pub service_duration_seconds: i64,
 
-    /// Shadow: which vehicle this visit is assigned to.
     #[inverse_relation_shadow_variable(source_variable_name = "visits")]
     #[serde(skip)]
     pub vehicle_idx: Option<usize>,
 
-    /// Shadow: previous visit in the route (None if first).
     #[previous_element_shadow_variable(source_variable_name = "visits")]
     #[serde(skip)]
     pub previous_visit_idx: Option<usize>,
 
-    /// Shadow: next visit in the route (None if last).
     #[next_element_shadow_variable(source_variable_name = "visits")]
     #[serde(skip)]
     pub next_visit_idx: Option<usize>,
 
-    /// Shadow: computed arrival time at this visit.
     #[cascading_update_shadow_variable]
     #[serde(skip)]
     pub arrival_time: Option<NaiveDateTime>,
@@ -77,7 +73,6 @@ impl Visit {
         }
     }
 
-    /// Calculate departure time from this visit.
     pub fn departure_time(&self) -> Option<NaiveDateTime> {
         self.arrival_time.map(|arrival| {
             let service_start = arrival.max(self.min_start_time);
@@ -85,13 +80,11 @@ impl Visit {
         })
     }
 
-    /// Check if service finishes after max_end_time.
     pub fn is_service_finished_after_max_end_time(&self) -> bool {
         self.departure_time()
             .is_some_and(|dep| dep > self.max_end_time)
     }
 
-    /// Delay in minutes past max_end_time (for constraint penalty).
     pub fn service_finished_delay_in_minutes(&self) -> i64 {
         match self.departure_time() {
             Some(dep) if dep > self.max_end_time => {
@@ -103,7 +96,6 @@ impl Visit {
     }
 }
 
-/// A vehicle that can service visits.
 #[planning_entity]
 #[derive(Serialize, Deserialize)]
 pub struct Vehicle {
@@ -117,7 +109,6 @@ pub struct Vehicle {
     #[serde(rename = "departureTime")]
     pub departure_time: NaiveDateTime,
 
-    /// Planning list variable: ordered visits assigned to this vehicle.
     #[planning_list_variable]
     #[serde(skip)]
     pub visits: Vec<usize>,
@@ -156,7 +147,6 @@ impl Vehicle {
     }
 }
 
-/// The vehicle routing solution.
 #[planning_solution]
 #[solverforge_constraints_path = "crate::constraints::define_constraints"]
 #[shadow_variable_updates(
@@ -217,7 +207,6 @@ impl VehicleRoutePlan {
         }
     }
 
-    /// Get travel time in seconds between two location indices.
     #[inline]
     pub fn travel_time(&self, from_idx: usize, to_idx: usize) -> i64 {
         if self.travel_times.is_empty() {
@@ -240,7 +229,6 @@ impl VehicleRoutePlan {
         &self.visits[visit_idx]
     }
 
-    /// Calculate total demand for a vehicle.
     pub fn vehicle_total_demand(&self, vehicle: &Vehicle) -> i32 {
         vehicle
             .visits
@@ -249,7 +237,6 @@ impl VehicleRoutePlan {
             .sum()
     }
 
-    /// Calculate total driving time in seconds for a vehicle route.
     pub fn vehicle_total_driving_time_seconds(&self, vehicle: &Vehicle) -> i64 {
         if vehicle.visits.is_empty() {
             return 0;
@@ -297,7 +284,9 @@ impl VehicleRoutePlan {
         let (prev_loc, departure_time) = match visit.previous_visit_idx {
             Some(prev_idx) => {
                 let prev_visit = &self.visits[prev_idx];
-                let dep_time = prev_visit.departure_time().unwrap_or(vehicle.departure_time);
+                let dep_time = prev_visit
+                    .departure_time()
+                    .unwrap_or(vehicle.departure_time);
                 (prev_visit.location_idx, dep_time)
             }
             None => {

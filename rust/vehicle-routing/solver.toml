@@ -1,0 +1,23 @@
+# SolverForge Configuration for Vehicle Routing
+
+[termination]
+seconds_spent_limit = 30
+unimproved_seconds_spent_limit = 5
+
+[[phases]]
+type = "construction_heuristic"
+construction_heuristic_type = "first_fit"
+
+[[phases]]
+type = "local_search"
+
+[phases.acceptor]
+type = "late_acceptance"
+late_acceptance_size = 400
+
+[phases.move_selector]
+type = "union_move_selector"
+selectors = [
+    { type = "list_change_move_selector" },
+    { type = "k_opt_move_selector", k_value = 3 }
+]

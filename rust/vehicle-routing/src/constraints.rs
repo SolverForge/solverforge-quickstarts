@@ -21,6 +21,7 @@ pub fn define_constraints() -> impl ConstraintSet<VehicleRoutePlan, HardSoftScor
         .as_constraint("vehicleCapacity");
 
     // Hard: service finished after max end time - uses Visit.arrival_time shadow
+    // NOTE: Uses descriptor_index=1 because visits is the second entity collection
     let service_finished_after_max_end_time = factory
         .clone()
         .for_each(|s: &VehicleRoutePlan| s.visits.as_slice())
@@ -28,7 +29,7 @@ pub fn define_constraints() -> impl ConstraintSet<VehicleRoutePlan, HardSoftScor
         .penalize_hard_with(|visit: &Visit| {
             HardSoftScore::of_hard(visit.service_finished_delay_in_minutes())
         })
-        .as_constraint("serviceFinishedAfterMaxEndTime");
+        .as_constraint_for_descriptor("serviceFinishedAfterMaxEndTime", 1);
 
     // Soft: minimize travel time - uses shadow total_driving_time_seconds field
     let minimize_travel_time = factory
@@ -36,5 +37,9 @@ pub fn define_constraints() -> impl ConstraintSet<VehicleRoutePlan, HardSoftScor
         .penalize_with(|v: &Vehicle| HardSoftScore::of_soft(v.total_driving_time_seconds))
         .as_constraint("minimizeTravelTime");
 
-    (vehicle_capacity, service_finished_after_max_end_time, minimize_travel_time)
+    (
+        vehicle_capacity,
+        service_finished_after_max_end_time,
+        minimize_travel_time,
+    )
 }

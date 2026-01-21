@@ -5,7 +5,6 @@
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
 
@@ -14,8 +13,6 @@ use vehicle_routing::api;
 #[tokio::main]
 async fn main() {
     solverforge::console::init();
-
-    let state = Arc::new(api::AppState::new());
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -28,7 +25,7 @@ async fn main() {
         "static"
     };
 
-    let app = api::router(state)
+    let app = api::router()
         .fallback_service(ServeDir::new(static_path))
         .layer(cors);
 

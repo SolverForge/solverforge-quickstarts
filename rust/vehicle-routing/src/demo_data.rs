@@ -94,7 +94,7 @@ impl DemoData {
             DemoData::Philadelphia => DemoDataConfig {
                 seed: 0,
                 visit_count: 55,
-                vehicle_count: 6,
+                vehicle_count: 10,
                 vehicle_start_time: start_time,
                 min_vehicle_capacity: 15,
                 max_vehicle_capacity: 30,
@@ -208,7 +208,8 @@ pub fn generate(demo: DemoData) -> VehicleRoutePlan {
         .collect();
 
     // Build visits
-    let selected_visit_indices: Vec<usize> = visit_indices.into_iter().take(config.visit_count).collect();
+    let selected_visit_indices: Vec<usize> =
+        visit_indices.into_iter().take(config.visit_count).collect();
     let visits: Vec<Visit> = (0..selected_visit_indices.len())
         .map(|i| {
             let visit_idx = selected_visit_indices[i];
@@ -247,7 +248,12 @@ fn philadelphia_visits() -> Vec<(&'static str, f64, f64, CustomerType)> {
             -75.1589,
             CustomerType::Restaurant,
         ),
-        ("Parc Restaurant", 39.9493, -75.1727, CustomerType::Restaurant),
+        (
+            "Parc Restaurant",
+            39.9493,
+            -75.1727,
+            CustomerType::Restaurant,
+        ),
         ("Zahav", 39.9430, -75.1474, CustomerType::Restaurant),
         ("Vetri Cucina", 39.9499, -75.1659, CustomerType::Restaurant),
         (
@@ -281,8 +287,18 @@ fn philadelphia_visits() -> Vec<(&'static str, f64, f64, CustomerType)> {
         // Businesses
         ("Comcast Center", 39.9543, -75.1690, CustomerType::Business),
         ("Liberty Place", 39.9520, -75.1685, CustomerType::Business),
-        ("BNY Mellon Center", 39.9505, -75.1660, CustomerType::Business),
-        ("One Liberty Place", 39.9520, -75.1685, CustomerType::Business),
+        (
+            "BNY Mellon Center",
+            39.9505,
+            -75.1660,
+            CustomerType::Business,
+        ),
+        (
+            "One Liberty Place",
+            39.9520,
+            -75.1685,
+            CustomerType::Business,
+        ),
         ("Aramark Tower", 39.9550, -75.1705, CustomerType::Business),
         ("PSFS Building", 39.9510, -75.1618, CustomerType::Business),
         (
@@ -352,7 +368,12 @@ fn philadelphia_visits() -> Vec<(&'static str, f64, f64, CustomerType)> {
             CustomerType::Residential,
         ),
         ("Fishtown", 39.9712, -75.1340, CustomerType::Residential),
-        ("Queen Village", 39.9380, -75.1520, CustomerType::Residential),
+        (
+            "Queen Village",
+            39.9380,
+            -75.1520,
+            CustomerType::Residential,
+        ),
         ("Bella Vista", 39.9395, -75.1598, CustomerType::Residential),
         (
             "Graduate Hospital",
@@ -361,7 +382,12 @@ fn philadelphia_visits() -> Vec<(&'static str, f64, f64, CustomerType)> {
             CustomerType::Residential,
         ),
         ("Fairmount", 39.9680, -75.1750, CustomerType::Residential),
-        ("Spring Garden", 39.9620, -75.1620, CustomerType::Residential),
+        (
+            "Spring Garden",
+            39.9620,
+            -75.1620,
+            CustomerType::Residential,
+        ),
         (
             "Art Museum Area",
             39.9656,
@@ -369,7 +395,12 @@ fn philadelphia_visits() -> Vec<(&'static str, f64, f64, CustomerType)> {
             CustomerType::Residential,
         ),
         ("Brewerytown", 39.9750, -75.1850, CustomerType::Residential),
-        ("East Passyunk", 39.9310, -75.1605, CustomerType::Residential),
+        (
+            "East Passyunk",
+            39.9310,
+            -75.1605,
+            CustomerType::Residential,
+        ),
         ("Point Breeze", 39.9285, -75.1780, CustomerType::Residential),
         ("Pennsport", 39.9320, -75.1450, CustomerType::Residential),
         (
@@ -381,7 +412,12 @@ fn philadelphia_visits() -> Vec<(&'static str, f64, f64, CustomerType)> {
         ("Spruce Hill", 39.9530, -75.2100, CustomerType::Residential),
         ("Cedar Park", 39.9490, -75.2200, CustomerType::Residential),
         ("Kensington", 39.9850, -75.1280, CustomerType::Residential),
-        ("Port Richmond", 39.9870, -75.1120, CustomerType::Residential),
+        (
+            "Port Richmond",
+            39.9870,
+            -75.1120,
+            CustomerType::Residential,
+        ),
     ]
 }
 
@@ -496,7 +532,12 @@ fn hartford_visits() -> Vec<(&'static str, f64, f64, CustomerType)> {
 fn firenze_visits() -> Vec<(&'static str, f64, f64, CustomerType)> {
     vec![
         // Restaurants
-        ("Trattoria Mario", 43.7750, 11.2530, CustomerType::Restaurant),
+        (
+            "Trattoria Mario",
+            43.7750,
+            11.2530,
+            CustomerType::Restaurant,
+        ),
         ("Buca Mario", 43.7698, 11.2505, CustomerType::Restaurant),
         ("Il Latini", 43.7705, 11.2495, CustomerType::Restaurant),
         (
@@ -572,7 +613,12 @@ fn firenze_visits() -> Vec<(&'static str, f64, f64, CustomerType)> {
             CustomerType::Business,
         ),
         ("Palazzo Pitti", 43.7650, 11.2500, CustomerType::Business),
-        ("Accademia Gallery", 43.7768, 11.2590, CustomerType::Business),
+        (
+            "Accademia Gallery",
+            43.7768,
+            11.2590,
+            CustomerType::Business,
+        ),
         ("Ospedale Meyer", 43.7910, 11.2520, CustomerType::Business),
         (
             "Polo Universitario",
@@ -587,7 +633,12 @@ fn firenze_visits() -> Vec<(&'static str, f64, f64, CustomerType)> {
         ("San Lorenzo", 43.7755, 11.2540, CustomerType::Residential),
         ("San Marco", 43.7780, 11.2585, CustomerType::Residential),
         ("Sant'Ambrogio", 43.7705, 11.2680, CustomerType::Residential),
-        ("Campo di Marte", 43.7820, 11.2820, CustomerType::Residential),
+        (
+            "Campo di Marte",
+            43.7820,
+            11.2820,
+            CustomerType::Residential,
+        ),
         ("Novoli", 43.7880, 11.2220, CustomerType::Residential),
         ("Rifredi", 43.7950, 11.2410, CustomerType::Residential),
         ("Le Cure", 43.7890, 11.2580, CustomerType::Residential),
