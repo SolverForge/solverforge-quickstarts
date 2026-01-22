@@ -2,6 +2,7 @@
 
 use chrono::{NaiveDateTime, NaiveTime, TimeDelta};
 use rand::prelude::*;
+use solverforge_maps::Coord;
 use std::str::FromStr;
 
 use crate::domain::{Vehicle, VehicleRoutePlan, Visit};
@@ -61,8 +62,6 @@ pub struct DemoDataConfig {
     pub vehicle_start_time: NaiveTime,
     pub min_vehicle_capacity: i32,
     pub max_vehicle_capacity: i32,
-    pub south_west: (f64, f64),
-    pub north_east: (f64, f64),
 }
 
 /// Available demo datasets.
@@ -98,8 +97,6 @@ impl DemoData {
                 vehicle_start_time: start_time,
                 min_vehicle_capacity: 15,
                 max_vehicle_capacity: 30,
-                south_west: (39.92, -75.23),
-                north_east: (40.00, -75.11),
             },
             DemoData::Hartford => DemoDataConfig {
                 seed: 1,
@@ -108,8 +105,6 @@ impl DemoData {
                 vehicle_start_time: start_time,
                 min_vehicle_capacity: 20,
                 max_vehicle_capacity: 30,
-                south_west: (41.69, -72.75),
-                north_east: (41.79, -72.60),
             },
             DemoData::Firenze => DemoDataConfig {
                 seed: 2,
@@ -118,8 +113,6 @@ impl DemoData {
                 vehicle_start_time: start_time,
                 min_vehicle_capacity: 20,
                 max_vehicle_capacity: 40,
-                south_west: (43.73, 11.17),
-                north_east: (43.81, 11.32),
             },
         }
     }
@@ -179,7 +172,7 @@ pub fn generate(demo: DemoData) -> VehicleRoutePlan {
 
     // Add depot coordinates
     for (_, lat, lng) in depots.iter().take(config.vehicle_count) {
-        coordinates.push((*lat, *lng));
+        coordinates.push(Coord::new(*lat, *lng));
     }
 
     // Add visit coordinates (shuffled)
@@ -189,7 +182,7 @@ pub fn generate(demo: DemoData) -> VehicleRoutePlan {
     let depot_count = config.vehicle_count.min(depots.len());
     for &visit_idx in visit_indices.iter().take(config.visit_count) {
         let (_, lat, lng, _) = visit_locs[visit_idx];
-        coordinates.push((lat, lng));
+        coordinates.push(Coord::new(lat, lng));
     }
 
     // Build vehicles
@@ -229,14 +222,7 @@ pub fn generate(demo: DemoData) -> VehicleRoutePlan {
         })
         .collect();
 
-    VehicleRoutePlan::new(
-        "demo",
-        coordinates,
-        vehicles,
-        visits,
-        config.south_west,
-        config.north_east,
-    )
+    VehicleRoutePlan::new("demo", coordinates, vehicles, visits)
 }
 
 fn philadelphia_visits() -> Vec<(&'static str, f64, f64, CustomerType)> {

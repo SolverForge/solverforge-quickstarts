@@ -4,6 +4,7 @@ version = "0.5.0"
 edition = "2021"
 description = "Vehicle routing quickstart for SolverForge"
 publish = false
+default-run = "vehicle-routing"
 
 [dependencies]
 solverforge = { path="../../../solverforge-rs/crates/solverforge", features = ["serde", "console", "verbose-logging"] }
@@ -28,4 +29,5 @@ utoipa = { version = "5", features = ["axum_extras"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
 async-stream = "0.3"
 tokio-stream = "0.1"
+tokio-util = "0.7"
 futures = "0.3"

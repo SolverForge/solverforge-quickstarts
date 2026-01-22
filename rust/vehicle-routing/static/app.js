@@ -4,7 +4,7 @@ let demoDataId = null;
 let loadedRoutePlan = null;
 let newVisit = null;
 let visitMarker = null;
-let useRealRoads = false; // Routing mode toggle state (default: haversine)
+
 let solveAbortController = null; // AbortController for SSE solve connection
 const solveButton = $("#solveButton");
 const stopSolvingButton = $("#stopSolvingButton");
@@ -12,52 +12,26 @@ const vehiclesTable = $("#vehicles");
 const analyzeButton = $("#analyzeButton");
 
 /**
- * Decode an encoded polyline string into an array of [lat, lng] coordinates.
- * This is the Google polyline encoding algorithm.
- * @param {string} encoded - The encoded polyline string
- * @returns {Array<Array<number>>} Array of [lat, lng] coordinate pairs
+ * Convert a Coord object {lat, lng} to a Leaflet-compatible [lat, lng] array.
+ * @param {Object} coord - Coord object with lat and lng properties
+ * @returns {Array<number>} [lat, lng] array
  */
-function decodePolyline(encoded) {
-  if (!encoded) return [];
-
-  const points = [];
-  let index = 0;
-  let lat = 0;
-  let lng = 0;
-
-  while (index < encoded.length) {
-    // Decode latitude
-    let shift = 0;
-    let result = 0;
-    let byte;
-    do {
-      byte = encoded.charCodeAt(index++) - 63;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20);
-    const dlat = result & 1 ? ~(result >> 1) : result >> 1;
-    lat += dlat;
-
-    // Decode longitude
-    shift = 0;
-    result = 0;
-    do {
-      byte = encoded.charCodeAt(index++) - 63;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20);
-    const dlng = result & 1 ? ~(result >> 1) : result >> 1;
-    lng += dlng;
-
-    // Polyline encoding uses precision of 5 decimal places
-    points.push([lat / 1e5, lng / 1e5]);
-  }
-
-  return points;
+function coordToArray(coord) {
+  return [coord.lat, coord.lng];
 }
 
 /**
- * Store raw geometries map. Format: { "fromIdx-toIdx": "encodedPolyline" }
+ * Convert an array of Coord objects to Leaflet-compatible [lat, lng] arrays.
+ * @param {Array<Object>} coords - Array of Coord objects
+ * @returns {Array<Array<number>>} Array of [lat, lng] arrays
+ */
+function coordsToArrays(coords) {
+  if (!coords) return [];
+  return coords.map(coordToArray);
+}
+
+/**
+ * Store raw geometries map. Format: { "fromIdx-toIdx": [Coord, ...] }
  * Frontend looks up geometries by location index pairs when drawing routes.
  */
 let rawGeometries = null;
@@ -87,17 +61,12 @@ function updateLoadingProgress(message, percent, detail = "") {
 
 /**
  * Load demo data with progress updates via Server-Sent Events.
- * Used when Real Roads mode is enabled.
  */
 function loadDemoDataWithProgress(demoId) {
   return new Promise((resolve, reject) => {
-    const routingMode = useRealRoads ? "real_roads" : "haversine";
-    const url = `/demo-data/${demoId}/stream?routing=${routingMode}`;
+    const url = `/demo-data/${demoId}/stream`;
 
-    showLoadingOverlay(
-      useRealRoads ? "Loading Real Road Data" : "Loading Demo Data",
-      "Connecting...",
-    );
+    showLoadingOverlay("Loading Road Network", "Connecting...");
 
     const eventSource = new EventSource(url);
     let solution = null;
@@ -287,22 +256,6 @@ $(document).ready(function () {
     }
   });
 
-  // Real Roads toggle handler
-  $(document).on("change", "#realRoadRouting", function () {
-    useRealRoads = $(this).is(":checked");
-
-    // If we have a demo dataset loaded, reload it with the new routing mode
-    if (demoDataId && !optimizing) {
-      initialized = false;
-      homeLocationGroup.clearLayers();
-      homeLocationMarkerByIdMap.clear();
-      visitGroup.clearLayers();
-      visitMarkerByIdMap.clear();
-      rawGeometries = null;
-      loadDemoData();
-    }
-  });
-
   setupAjax();
   fetchDemoData();
 });
@@ -330,8 +283,8 @@ function openAddVehicleModal() {
   const existingVehicle = loadedRoutePlan.vehicles[0];
   if (existingVehicle) {
     $("#vehicleCapacity").val(existingVehicle.capacity || 25);
-    const defaultLat = existingVehicle.homeLocation[0];
-    const defaultLng = existingVehicle.homeLocation[1];
+    const defaultLat = existingVehicle.homeLocation.lat;
+    const defaultLng = existingVehicle.homeLocation.lng;
     $("#vehicleHomeLat").val(defaultLat.toFixed(6));
     $("#vehicleHomeLng").val(defaultLng.toFixed(6));
   }
@@ -492,7 +445,7 @@ async function confirmAddVehicle() {
     id: newId,
     name: vehicleName,
     capacity: capacity,
-    homeLocation: [lat, lng],
+    homeLocation: { lat, lng },
     departureTime: formattedDeparture,
     visits: [],
     totalDemand: 0,
@@ -754,7 +707,7 @@ function highlightVehicleRoute(vehicleId) {
       marker.setOpacity(1);
 
       // Add number marker
-      const numberMarker = L.marker(visit.location, {
+      const numberMarker = L.marker(coordToArray(visit.location), {
         icon: createRouteNumberIcon(stopNumber, vehicleColor),
         interactive: false,
         zIndexOffset: 1000,
@@ -783,7 +736,7 @@ function highlightVehicleRoute(vehicleId) {
   $(`#vehicle-row-${vehicleId}`).addClass("table-active");
 
   // Add start marker (S) at depot
-  const startMarker = L.marker(vehicle.homeLocation, {
+  const startMarker = L.marker(coordToArray(vehicle.homeLocation), {
     icon: createRouteNumberIcon("S", vehicleColor),
     interactive: false,
     zIndexOffset: 1000,
@@ -846,13 +799,11 @@ async function renderRouteLines(highlightedId = null) {
     let prevIdx = homeLocationIdx;
     for (const visit of vehicleVisits) {
       const key = `${prevIdx}-${visit.locationIdx}`;
-      const polyline = rawGeometries?.[key];
+      const coords = rawGeometries?.[key];
 
-      if (polyline) {
-        const points = decodePolyline(polyline);
-        if (points.length > 0) {
-          L.polyline(points, { color, weight, opacity }).addTo(routeGroup);
-        }
+      if (coords && coords.length > 0) {
+        const points = coordsToArrays(coords);
+        L.polyline(points, { color, weight, opacity }).addTo(routeGroup);
       }
       // No fallback - if no geometry, don't draw anything
       prevIdx = visit.locationIdx;
@@ -861,13 +812,11 @@ async function renderRouteLines(highlightedId = null) {
     // Return to home
     const lastVisit = vehicleVisits[vehicleVisits.length - 1];
     const returnKey = `${lastVisit.locationIdx}-${homeLocationIdx}`;
-    const returnPolyline = rawGeometries?.[returnKey];
+    const returnCoords = rawGeometries?.[returnKey];
 
-    if (returnPolyline) {
-      const points = decodePolyline(returnPolyline);
-      if (points.length > 0) {
-        L.polyline(points, { color, weight, opacity }).addTo(routeGroup);
-      }
+    if (returnCoords && returnCoords.length > 0) {
+      const points = coordsToArrays(returnCoords);
+      L.polyline(points, { color, weight, opacity }).addTo(routeGroup);
     }
     // No fallback - if no geometry, don't draw anything
   }
@@ -997,7 +946,7 @@ function getHomeLocationMarker(vehicle) {
     marker.setIcon(createVehicleHomeIcon(vehicle));
     return marker;
   }
-  marker = L.marker(vehicle.homeLocation, {
+  marker = L.marker(coordToArray(vehicle.homeLocation), {
     icon: createVehicleHomeIcon(vehicle),
   });
   marker.addTo(homeLocationGroup).bindPopup();
@@ -1055,7 +1004,7 @@ function getVisitMarker(visit) {
     return marker;
   }
 
-  marker = L.marker(visit.location, {
+  marker = L.marker(coordToArray(visit.location), {
     icon: createCustomerTypeIcon(customerType, isAssigned),
   });
   marker.addTo(visitGroup).bindPopup();
@@ -1065,8 +1014,11 @@ function getVisitMarker(visit) {
 
 async function renderRoutes(solution) {
   if (!initialized) {
-    const bounds = [solution.southWestCorner, solution.northEastCorner];
-    map.fitBounds(bounds);
+    const allCoords = [
+      ...solution.vehicles.map((v) => [v.homeLocation.lat, v.homeLocation.lng]),
+      ...solution.visits.map((v) => [v.location.lat, v.location.lng]),
+    ];
+    map.fitBounds(allCoords);
   }
   // Vehicles
   vehiclesTable.children().remove();
@@ -1379,7 +1331,7 @@ function openRecommendationModal(lat, lng) {
   // see recommended-fit.js
   const visitId =
     Math.max(...loadedRoutePlan.visits.map((c) => parseInt(c.id))) + 1;
-  newVisit = { id: visitId, location: [lat, lng] };
+  newVisit = { id: visitId, location: { lat, lng } };
   addNewVisit(visitId, lat, lng, map, visitMarker);
 }
 
@@ -1524,17 +1476,11 @@ function setupAjax() {
  * Routes update in real-time on the map as the solver finds better solutions.
  */
 async function solve() {
-  // Set up abort controller for stopping
   solveAbortController = new AbortController();
-
-  // Update UI to solving state
   refreshSolvingButtons(true);
 
-  // Always use haversine for solving (fast). Real road geometries are kept cached.
-  const routingMode = "haversine";
-
   try {
-    const response = await fetch(`/route-plans?routing=${routingMode}`, {
+    const response = await fetch("/route-plans", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(loadedRoutePlan),
@@ -1555,7 +1501,7 @@ async function solve() {
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n\n");
-      buffer = lines.pop(); // Keep incomplete chunk
+      buffer = lines.pop();
 
       for (const line of lines) {
         if (line.startsWith("data: ")) {
@@ -1569,11 +1515,9 @@ async function solve() {
       }
     }
 
-    // Stream ended normally (solver finished)
     onSolveComplete();
   } catch (error) {
     if (error.name === "AbortError") {
-      // User clicked stop - this is expected
       onSolveComplete();
     } else {
       console.error("Solve failed:", error);
@@ -1654,54 +1598,25 @@ async function loadDemoData() {
   rawGeometries = null;
 
   try {
-    let routePlan;
-    if (useRealRoads) {
-      // Use SSE streaming for real roads to show progress
-      routePlan = await loadDemoDataWithProgress(demoDataId);
-    } else {
-      // Use simple GET for haversine (instant, no loading overlay)
-      routePlan = await $.getJSON(`/demo-data/${demoDataId}`);
-    }
+    // Always use real roads - load with SSE streaming to show progress
+    const routePlan = await loadDemoDataWithProgress(demoDataId);
     loadedRoutePlan = routePlan;
     await renderRoutes(routePlan);
     renderTimelines(routePlan);
     initialized = true;
   } catch (error) {
-    // Handle error - show user-friendly message and fall back to haversine
     console.error("Demo data loading failed:", error);
-    showSimpleError(
-      "Road network loading failed: " +
-        error.message +
-        ". Falling back to straight-line routing.",
-    );
-
-    // Disable real roads toggle and reload with haversine
-    useRealRoads = false;
-    $("#realRoadRouting").prop("checked", false);
-
-    try {
-      const routePlan = await $.getJSON(`/demo-data/${demoDataId}`);
-      loadedRoutePlan = routePlan;
-      await renderRoutes(routePlan);
-      renderTimelines(routePlan);
-      initialized = true;
-    } catch (fallbackError) {
-      showSimpleError(
-        "Failed to load demo data: " +
-          (fallbackError.message || "Unknown error"),
-      );
-    }
+    showSimpleError("Failed to load demo data: " + error.message);
   }
 }
 
 /**
- * Stop solving by aborting the SSE connection.
+ * Stop solving by aborting the fetch.
  * The backend detects the closed connection and stops the solver automatically.
  */
 function stopSolving() {
   if (solveAbortController) {
     solveAbortController.abort();
-    // onSolveComplete() will be called from the catch block in solve()
   }
 }
 
@@ -1789,12 +1704,6 @@ function replaceQuickstartSolverForgeAutoHeaderFooter() {
             </ul>
           </div>
           <div class="ms-auto d-flex align-items-center gap-3">
-              <div class="form-check form-switch d-flex align-items-center" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Enable real road routing using OpenStreetMap data. Slower initial load (~5-15s for download), but shows accurate road routes instead of straight lines.">
-                  <input class="form-check-input" type="checkbox" id="realRoadRouting" style="width: 2.5em; height: 1.25em; cursor: pointer;">
-                  <label class="form-check-label ms-2" for="realRoadRouting" style="white-space: nowrap; cursor: pointer;">
-                      <i class="fas fa-road"></i> Real Roads
-                  </label>
-              </div>
               <div class="dropdown">
                   <button class="btn dropdown-toggle" type="button" id="dropdownMenuButton" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false" style="background-color: #10b981; color: #ffffff; border-color: #10b981;">
                       Data
