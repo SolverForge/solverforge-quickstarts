@@ -64,7 +64,8 @@ pub struct VehicleRoutePlanDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_date_time: Option<NaiveDateTime>,
     /// Raw geometries indexed by "fromIdx-toIdx" for frontend lookup.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Server-generated only - ignored on deserialize to prevent bloated requests.
+    #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
     pub geometries: Option<HashMap<String, Vec<Coord>>>,
 }
 

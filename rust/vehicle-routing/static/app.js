@@ -5,6 +5,17 @@ let loadedRoutePlan = null;
 let newVisit = null;
 let visitMarker = null;
 
+/**
+ * Strip geometries from a route plan before sending to server.
+ * Geometries are huge (road path coordinates) and server recomputes them.
+ * @param {Object} plan - Route plan object
+ * @returns {Object} Plan without geometries field
+ */
+function stripGeometries(plan) {
+  const { geometries, ...planWithoutGeometries } = plan;
+  return planWithoutGeometries;
+}
+
 let solveAbortController = null; // AbortController for SSE solve connection
 const solveButton = $("#solveButton");
 const stopSolvingButton = $("#stopSolvingButton");
@@ -1483,7 +1494,7 @@ async function solve() {
     const response = await fetch("/route-plans", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(loadedRoutePlan),
+      body: JSON.stringify(stripGeometries(loadedRoutePlan)),
       signal: solveAbortController.signal,
     });
 

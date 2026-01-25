@@ -313,11 +313,11 @@ async fn solve_route_plan(
 
 async fn analyze_route_plan(Json(dto): Json<VehicleRoutePlanDto>) -> Json<AnalyzeResponse> {
     use crate::constraints::define_constraints;
-    use solverforge::{ConstraintSet, TypedScoreDirector};
+    use solverforge::{ConstraintSet, ScoreDirector};
 
     let plan = dto.to_domain();
     let constraints = define_constraints();
-    let mut director = TypedScoreDirector::new(plan, constraints);
+    let mut director = ScoreDirector::new(plan, constraints);
     let score = director.calculate_score();
     let analyses = director
         .constraints()

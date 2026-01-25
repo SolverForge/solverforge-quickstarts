@@ -3,7 +3,7 @@
 //! Run with: cargo run --release -p employee-scheduling --bin bench
 
 use employee_scheduling::{constraints, demo_data};
-use solverforge::prelude::TypedScoreDirector;
+use solverforge::prelude::ScoreDirector;
 use std::time::Instant;
 
 fn main() {
@@ -17,7 +17,7 @@ fn main() {
     println!();
 
     let constraint_set = constraints::create_fluent_constraints();
-    let mut director = TypedScoreDirector::new(schedule, constraint_set);
+    let mut director = ScoreDirector::new(schedule, constraint_set);
 
     // Initialize
     let init_start = Instant::now();
@@ -34,21 +34,24 @@ fn main() {
     let bench_start = Instant::now();
     let mut moves: u64 = 0;
 
+    // descriptor_index 0 = shifts (the planning entity collection)
+    const SHIFT_DESCRIPTOR: usize = 0;
+
     for shift_idx in 0..n_shifts {
         let old_idx = director.working_solution().shifts[shift_idx].employee_idx;
 
         for emp_idx in 0..n_employees {
             // Do move
-            director.before_variable_changed(shift_idx);
+            director.before_variable_changed(SHIFT_DESCRIPTOR, shift_idx);
             director.working_solution_mut().shifts[shift_idx].employee_idx = Some(emp_idx);
-            director.after_variable_changed(shift_idx);
+            director.after_variable_changed(SHIFT_DESCRIPTOR, shift_idx);
             let _ = director.get_score();
             moves += 1;
 
             // Undo move
-            director.before_variable_changed(shift_idx);
+            director.before_variable_changed(SHIFT_DESCRIPTOR, shift_idx);
             director.working_solution_mut().shifts[shift_idx].employee_idx = old_idx;
-            director.after_variable_changed(shift_idx);
+            director.after_variable_changed(SHIFT_DESCRIPTOR, shift_idx);
             let _ = director.get_score();
             moves += 1;
         }

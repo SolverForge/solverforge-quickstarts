@@ -248,7 +248,14 @@ impl VehicleRoutePlan {
     /// Called by solver when vehicle's visits list changes.
     pub fn compute_vehicle_driving_time(&self, entity_idx: usize) -> i64 {
         let vehicle = &self.vehicles[entity_idx];
-        self.vehicle_total_driving_time_seconds(vehicle)
+        let time = self.vehicle_total_driving_time_seconds(vehicle);
+        eprintln!(
+            "compute_vehicle_driving_time(entity={}) visits={} time={}",
+            entity_idx,
+            vehicle.visits.len(),
+            time
+        );
+        time
     }
 
     /// Cascading shadow variable listener: update arrival_time for a visit.

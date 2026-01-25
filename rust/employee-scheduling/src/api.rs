@@ -164,7 +164,7 @@ async fn stop_solving(State(state): State<Arc<AppState>>, Path(id): Path<String>
 async fn analyze_schedule(Json(dto): Json<ScheduleDto>) -> Json<AnalyzeResponse> {
     let schedule = dto.to_domain();
     let constraints = create_fluent_constraints();
-    let director = TypedScoreDirector::new(schedule, constraints);
+    let director = ScoreDirector::new(schedule, constraints);
     let score = director.get_score();
     let analyses = director
         .constraints()
