@@ -28,13 +28,13 @@ Fix GHCR image visibility, add missing health endpoints, create Helm charts for 
 - [x] Create ingress.yaml template (rust/vehicle-routing-rust-pre/helm/vehicle-routing-pre/templates/ingress.yaml)
 
 ### Phase 5: Update CI/CD Pipeline
-- [ ] Add vehicle-routing and vehicle-routing-pre to matrix in docker-publish.yml (.github/workflows/docker-publish.yml)
-- [ ] Add paths triggers for rust/vehicle-routing/** and rust/vehicle-routing-rust-pre/** (.github/workflows/docker-publish.yml)
-- [ ] Add step to make images public after push (.github/workflows/docker-publish.yml)
+- [x] Add vehicle-routing and vehicle-routing-pre to matrix in docker-publish.yml (.github/workflows/docker-publish.yml)
+- [x] Add paths triggers for rust/vehicle-routing/** and rust/vehicle-routing-rust-pre/** (.github/workflows/docker-publish.yml)
+- [x] Add step to make images public after push (.github/workflows/docker-publish.yml)
 
 ### Phase 6: Verification
-- [ ] Build vehicle-routing Docker image locally
-- [ ] Build vehicle-routing-pre Docker image locally
+- [ ] Build vehicle-routing Docker image locally (BLOCKED: requires solverforge 0.6.0+ on crates.io - current code uses unreleased API)
+- [x] Build vehicle-routing-pre Docker image locally
 - [ ] Lint vehicle-routing Helm chart
 - [ ] Lint vehicle-routing-pre Helm chart
 
@@ -47,6 +47,7 @@ Fix GHCR image visibility, add missing health endpoints, create Helm charts for 
 - vehicle-routing-rust-pre already has a Dockerfile; only vehicle-routing needs one created
 - Making images public requires `packages:write` permission (already present in workflow)
 - The `gh api` call to set visibility may need `GITHUB_TOKEN` with appropriate permissions
+- **vehicle-routing Docker build blocker**: The app code uses a newer solverforge API (ScoreDirector, constraint builders) that isn't published to crates.io yet. The build will work once solverforge 0.6.0+ is published.
 
 ## Success Criteria
 

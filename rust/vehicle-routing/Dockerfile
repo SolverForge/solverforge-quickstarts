@@ -1,17 +1,18 @@
 # Multi-stage build for SolverForge Vehicle Routing (Rust)
 #
 # Build context: rust/vehicle-routing/
-# Uses published solverforge crate from crates.io
+# NOTE: Requires Cargo.toml to use published crates from crates.io, not local paths.
+# The app code must be compatible with the published solverforge version.
 
-FROM rust:1.83-alpine AS builder
+FROM rust:1.87-alpine AS builder
 
 # Install build dependencies
-RUN apk add --no-cache musl-dev
+RUN apk add --no-cache musl-dev curl
 
 WORKDIR /build
 
 # Copy workspace files
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml ./
 COPY src/ ./src/
 COPY static/ ./static/
 COPY solver.toml ./
