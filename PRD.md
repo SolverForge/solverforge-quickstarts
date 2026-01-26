@@ -17,7 +17,7 @@ Fix GHCR image visibility, add missing health endpoints, create Helm charts for 
 - [x] Create _helpers.tpl template (rust/vehicle-routing/helm/vehicle-routing/templates/_helpers.tpl)
 - [x] Create deployment.yaml template (rust/vehicle-routing/helm/vehicle-routing/templates/deployment.yaml)
 - [x] Create service.yaml template (rust/vehicle-routing/helm/vehicle-routing/templates/service.yaml)
-- [ ] Create ingress.yaml template (rust/vehicle-routing/helm/vehicle-routing/templates/ingress.yaml)
+- [x] Create ingress.yaml template (rust/vehicle-routing/helm/vehicle-routing/templates/ingress.yaml)
 
 ### Phase 4: Create Helm Chart for vehicle-routing-pre
 - [ ] Create Chart.yaml for vehicle-routing-pre (rust/vehicle-routing-rust-pre/helm/vehicle-routing-pre/Chart.yaml)
