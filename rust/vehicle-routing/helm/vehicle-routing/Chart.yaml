@@ -1,0 +1,12 @@
+apiVersion: v2
+name: vehicle-routing
+description: Vehicle Routing optimization using SolverForge (Rust/Axum)
+type: application
+version: 0.5.0
+appVersion: "0.5.0"
+keywords:
+  - solverforge
+  - optimization
+  - routing
+  - rust
+  - axum

@@ -12,7 +12,7 @@ Fix GHCR image visibility, add missing health endpoints, create Helm charts for 
 - [x] Create Dockerfile for rust/vehicle-routing following employee-scheduling pattern (rust/vehicle-routing/Dockerfile)
 
 ### Phase 3: Create Helm Chart for vehicle-routing
-- [ ] Create Chart.yaml for vehicle-routing (rust/vehicle-routing/helm/vehicle-routing/Chart.yaml)
+- [x] Create Chart.yaml for vehicle-routing (rust/vehicle-routing/helm/vehicle-routing/Chart.yaml)
 - [ ] Create values.yaml with probes on /healthz port 7860 (rust/vehicle-routing/helm/vehicle-routing/values.yaml)
 - [ ] Create _helpers.tpl template (rust/vehicle-routing/helm/vehicle-routing/templates/_helpers.tpl)
 - [ ] Create deployment.yaml template (rust/vehicle-routing/helm/vehicle-routing/templates/deployment.yaml)
