@@ -1751,6 +1751,7 @@ version = "0.5.1"
 dependencies = [
  "solverforge-core",
  "thiserror 2.0.17",
+ "tracing",
 ]
 
 [[package]]
