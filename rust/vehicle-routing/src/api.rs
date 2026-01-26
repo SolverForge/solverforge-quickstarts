@@ -21,6 +21,7 @@ use crate::dto::*;
 pub fn router() -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/healthz", get(health))
         .route("/info", get(info))
         .route("/demo-data", get(list_demo_data))
         .route("/demo-data/{id}", get(get_demo_data))
