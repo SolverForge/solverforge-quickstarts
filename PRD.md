@@ -6,10 +6,10 @@ Fix GHCR image visibility, add missing health endpoints, create Helm charts for 
 
 ### Phase 1: Add Health Endpoints to Rust Apps
 - [x] Add `/healthz` route alias to vehicle-routing API (rust/vehicle-routing/src/api.rs)
-- [ ] Add `/healthz` route alias to vehicle-routing-rust-pre API (rust/vehicle-routing-rust-pre/src/api.rs)
+- [x] Add `/healthz` route alias to vehicle-routing-rust-pre API (rust/vehicle-routing-rust-pre/src/api.rs)
 
 ### Phase 2: Create Dockerfile for vehicle-routing
-- [ ] Create Dockerfile for rust/vehicle-routing following employee-scheduling pattern (rust/vehicle-routing/Dockerfile)
+- [x] Create Dockerfile for rust/vehicle-routing following employee-scheduling pattern (rust/vehicle-routing/Dockerfile)
 
 ### Phase 3: Create Helm Chart for vehicle-routing
 - [ ] Create Chart.yaml for vehicle-routing (rust/vehicle-routing/helm/vehicle-routing/Chart.yaml)
