@@ -15,8 +15,8 @@ Fix GHCR image visibility, add missing health endpoints, create Helm charts for 
 - [x] Create Chart.yaml for vehicle-routing (rust/vehicle-routing/helm/vehicle-routing/Chart.yaml)
 - [x] Create values.yaml with probes on /healthz port 7860 (rust/vehicle-routing/helm/vehicle-routing/values.yaml)
 - [x] Create _helpers.tpl template (rust/vehicle-routing/helm/vehicle-routing/templates/_helpers.tpl)
-- [ ] Create deployment.yaml template (rust/vehicle-routing/helm/vehicle-routing/templates/deployment.yaml)
-- [ ] Create service.yaml template (rust/vehicle-routing/helm/vehicle-routing/templates/service.yaml)
+- [x] Create deployment.yaml template (rust/vehicle-routing/helm/vehicle-routing/templates/deployment.yaml)
+- [x] Create service.yaml template (rust/vehicle-routing/helm/vehicle-routing/templates/service.yaml)
 - [ ] Create ingress.yaml template (rust/vehicle-routing/helm/vehicle-routing/templates/ingress.yaml)
 
 ### Phase 4: Create Helm Chart for vehicle-routing-pre
