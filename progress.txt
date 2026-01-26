@@ -127,3 +127,95 @@ Task complete. I created `rust/vehicle-routing-rust-pre/helm/vehicle-routing-pre
 
 The chart passes `helm lint` (with expected info messages about missing values.yaml and icon). The change has been committed (10/22 tasks complete).
 
+
+## Iteration 11 - 2026-01-26 01:28:09
+
+Task complete. I created `rust/vehicle-routing-rust-pre/helm/vehicle-routing-pre/Chart.yaml` with:
+
+- `apiVersion: v2`
+- `name: vehicle-routing-pre`
+- `description: Vehicle Routing optimization using SolverForge (Rust/Axum) - Pre-release`
+- `type: application`
+- `version: 0.5.0` / `appVersion: "0.5.0"`
+- Keywords: solverforge, optimization, routing, rust, axum
+
+The chart passes `helm lint` validation (with expected info messages about missing values.yaml, which will be created in the next task). The changes have been committed in both the nested vehicle-routing-rust-pre repository and the parent repository (10/22 tasks complete).
+
+
+## Iteration 12 - 2026-01-26 01:31:15
+
+Task complete. I created `rust/vehicle-routing-rust-pre/helm/vehicle-routing-pre/values.yaml` with:
+
+- Image repository: `ghcr.io/solverforge/vehicle-routing-pre:latest`
+- Service port: 7860 (HF Spaces default)
+- Liveness probe on `/healthz` (named port `http`) - 10s initial delay
+- Readiness probe on `/healthz` (named port `http`) - 5s initial delay
+- Resource limits: 2 CPU, 2Gi memory
+- Ingress configuration (disabled by default, host: vehicle-routing-pre.local)
+
+The chart passes `helm lint` validation. Changes have been committed in both the nested submodule and the parent repository (11/22 tasks complete).
+
+
+## Iteration 13 - 2026-01-26
+
+Task complete. I created `rust/vehicle-routing-rust-pre/helm/vehicle-routing-pre/templates/_helpers.tpl` with standard Helm template helpers:
+
+- `app.name` - Chart name with optional override
+- `app.fullname` - Fully qualified app name
+- `app.chart` - Chart name and version for labels
+- `app.labels` - Common Kubernetes labels
+- `app.selectorLabels` - Selector labels for pod matching
+
+The chart passes `helm lint` validation. Changes have been committed in both the nested submodule and the parent repository (12/22 tasks complete).
+
+
+## Iteration 13 - 2026-01-26 01:34:09
+
+Task complete. I created `rust/vehicle-routing-rust-pre/helm/vehicle-routing-pre/templates/_helpers.tpl` with standard Helm template helpers:
+
+- `app.name` - Chart name with optional override
+- `app.fullname` - Fully qualified app name
+- `app.chart` - Chart name and version for labels
+- `app.labels` - Common Kubernetes labels
+- `app.selectorLabels` - Selector labels for pod matching
+
+The chart passes `helm lint` validation. Changes have been committed in both the nested submodule (commit 8f1d713) and the parent repository (commit d514e6b). Progress: 12/22 tasks complete.
+
+
+## Iteration 14 - 2026-01-26 01:37:01
+
+Task complete. I created `rust/vehicle-routing-rust-pre/helm/vehicle-routing-pre/templates/deployment.yaml` following the vehicle-routing pattern:
+
+- Standard Kubernetes Deployment with proper labels and selectors
+- Health probes configured on `/healthz` using named port `http`
+- Container port 7860 (HF Spaces default)
+- Resource limits/requests from values.yaml
+- Support for autoscaling, pod annotations, security contexts, node selectors, affinity, and tolerations
+
+The chart passes `helm lint` validation and `helm template` renders valid Kubernetes manifests. Changes have been committed in both the nested submodule (commit 8078244) and the parent repository (commit 7e8c41c). Progress: 13/22 tasks complete.
+
+
+## Iteration 15 - 2026-01-26 01:39:47
+
+Task complete. I created `rust/vehicle-routing-rust-pre/helm/vehicle-routing-pre/templates/service.yaml` following the vehicle-routing pattern:
+
+- Standard Kubernetes Service with proper labels using helper templates
+- ClusterIP type (configurable via values.yaml)
+- Port 7860 with named port `http` for health probe targeting
+- Selector labels matching the deployment
+
+The chart passes `helm lint` validation and `helm template` renders valid Kubernetes manifests. Changes have been committed in both the nested submodule (commit fc7003d) and the parent repository (commit afb1a4c). Progress: 14/22 tasks complete.
+
+
+## Iteration 16 - 2026-01-26 01:42:00
+
+Task complete. I created `rust/vehicle-routing-rust-pre/helm/vehicle-routing-pre/templates/ingress.yaml` following the vehicle-routing pattern:
+
+- Standard Kubernetes Ingress resource (networking.k8s.io/v1)
+- Conditional rendering based on `ingress.enabled` value
+- Support for ingress class name, annotations, TLS configuration
+- Routes traffic to the service on port 7860
+- Host-based routing with configurable paths
+
+The chart passes `helm lint` validation and `helm template --set ingress.enabled=true` renders valid Kubernetes manifests. Changes have been committed in the nested submodule (commit 1a30f3a). Phase 4 (Create Helm Chart for vehicle-routing-pre) is now complete. Progress: 15/22 tasks complete.
+

@@ -22,10 +22,10 @@ Fix GHCR image visibility, add missing health endpoints, create Helm charts for 
 ### Phase 4: Create Helm Chart for vehicle-routing-pre
 - [x] Create Chart.yaml for vehicle-routing-pre (rust/vehicle-routing-rust-pre/helm/vehicle-routing-pre/Chart.yaml)
 - [x] Create values.yaml with probes on /healthz port 7860 (rust/vehicle-routing-rust-pre/helm/vehicle-routing-pre/values.yaml)
-- [ ] Create _helpers.tpl template (rust/vehicle-routing-rust-pre/helm/vehicle-routing-pre/templates/_helpers.tpl)
-- [ ] Create deployment.yaml template (rust/vehicle-routing-rust-pre/helm/vehicle-routing-pre/templates/deployment.yaml)
-- [ ] Create service.yaml template (rust/vehicle-routing-rust-pre/helm/vehicle-routing-pre/templates/service.yaml)
-- [ ] Create ingress.yaml template (rust/vehicle-routing-rust-pre/helm/vehicle-routing-pre/templates/ingress.yaml)
+- [x] Create _helpers.tpl template (rust/vehicle-routing-rust-pre/helm/vehicle-routing-pre/templates/_helpers.tpl)
+- [x] Create deployment.yaml template (rust/vehicle-routing-rust-pre/helm/vehicle-routing-pre/templates/deployment.yaml)
+- [x] Create service.yaml template (rust/vehicle-routing-rust-pre/helm/vehicle-routing-pre/templates/service.yaml)
+- [x] Create ingress.yaml template (rust/vehicle-routing-rust-pre/helm/vehicle-routing-pre/templates/ingress.yaml)
 
 ### Phase 5: Update CI/CD Pipeline
 - [ ] Add vehicle-routing and vehicle-routing-pre to matrix in docker-publish.yml (.github/workflows/docker-publish.yml)
