@@ -10,6 +10,8 @@ on:
       - '*'
     paths:
       - 'rust/employee-scheduling/**'
+      - 'rust/vehicle-routing/**'
+      - 'rust/vehicle-routing-rust-pre/**'
       - 'legacy/employee-scheduling-fast/**'
       - 'legacy/maintenance-scheduling-fast/**'
       - 'legacy/meeting-scheduling-fast/**'
