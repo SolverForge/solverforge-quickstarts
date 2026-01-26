@@ -1,0 +1,172 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+      - 'release/**'
+    paths:
+      - 'rust/employee-scheduling/**'
+      - 'legacy/employee-scheduling-fast/**'
+      - 'legacy/maintenance-scheduling-fast/**'
+      - 'legacy/meeting-scheduling-fast/**'
+      - 'legacy/order-picking-fast/**'
+      - 'legacy/vehicle-routing-fast/**'
+      - 'legacy/vm-placement-fast/**'
+      - '.github/workflows/docker-publish.yml'
+  workflow_dispatch:
+    inputs:
+      apps:
+        description: 'Apps to build (comma-separated, or "all")'
+        required: false
+        default: 'all'
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  # Rust tests
+  test-rust:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/employee-scheduling
+
+      - name: Run tests
+        working-directory: rust/employee-scheduling
+        run: cargo test --verbose
+
+      - name: Build
+        working-directory: rust/employee-scheduling
+        run: cargo build --release --verbose
+
+  # Python legacy tests
+  test-python:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          - name: employee-scheduling-fast
+            path: legacy/employee-scheduling-fast
+          - name: maintenance-scheduling-fast
+            path: legacy/maintenance-scheduling-fast
+          - name: meeting-scheduling-fast
+            path: legacy/meeting-scheduling-fast
+          - name: order-picking-fast
+            path: legacy/order-picking-fast
+          - name: vehicle-routing-fast
+            path: legacy/vehicle-routing-fast
+          - name: vm-placement-fast
+            path: legacy/vm-placement-fast
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.app.path }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest
+
+      - name: Run tests
+        working-directory: ${{ matrix.app.path }}
+        run: pytest -v
+
+  # Build and push on main and dev
+  build-and-push:
+    needs: [test-rust, test-python]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          - name: employee-scheduling
+            context: rust/employee-scheduling
+          - name: employee-scheduling-fast
+            context: legacy/employee-scheduling-fast
+          - name: maintenance-scheduling-fast
+            context: legacy/maintenance-scheduling-fast
+          - name: meeting-scheduling-fast
+            context: legacy/meeting-scheduling-fast
+          - name: order-picking-fast
+            context: legacy/order-picking-fast
+          - name: vehicle-routing-fast
+            context: legacy/vehicle-routing-fast
+          - name: vm-placement-fast
+            context: legacy/vm-placement-fast
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check if app should be built
+        id: check
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            apps="${{ github.event.inputs.apps }}"
+            if [[ "$apps" == "all" || "$apps" == *"${{ matrix.app.name }}"* ]]; then
+              echo "build=true" >> $GITHUB_OUTPUT
+            else
+              echo "build=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "build=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.build == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: steps.check.outputs.build == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        if: steps.check.outputs.build == 'true'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.app.name }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=
+            type=raw,value=latest
+
+      - name: Build and push Docker image
+        if: steps.check.outputs.build == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.app.context }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
