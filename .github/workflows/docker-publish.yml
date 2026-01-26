@@ -110,6 +110,10 @@ jobs:
         app:
           - name: employee-scheduling
             context: rust/employee-scheduling
+          - name: vehicle-routing
+            context: rust/vehicle-routing
+          - name: vehicle-routing-pre
+            context: rust/vehicle-routing-rust-pre
           - name: employee-scheduling-fast
             context: legacy/employee-scheduling-fast
           - name: maintenance-scheduling-fast
